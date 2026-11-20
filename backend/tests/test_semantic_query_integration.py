@@ -19,6 +19,13 @@ def jaffle_shop_path() -> Path:
     return Path(configured_path)
 
 
+def test_orders_query_adapter_still_uses_the_current_order_mart_source():
+    catalog = load_catalog(ROOT, "orders")
+
+    assert {metric["model"] for metric in catalog["metrics"].values()} == {"order_mart"}
+    assert {dimension["model"] for dimension in catalog["dimensions"].values()} == {"order_mart"}
+
+
 def test_orders_catalog_is_projected_from_the_published_semantic_model():
     catalog = load_catalog(ROOT, "orders")
 

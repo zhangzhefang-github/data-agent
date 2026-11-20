@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 
 from app.semantic.diagnostics import Diagnostic, ValidationResult
-from app.semantic.models import Dataset, Metric, SemanticModel
+from app.semantic.models import Dataset, Dimension, Metric, SemanticModel
 
 
 def validate_semantic_model(
@@ -52,10 +52,7 @@ def validate_semantic_model(
                    "A many-to-many relationship can multiply rows.", "Set fanout_risk to true and restrict its use.")
 
     for dimension in model.dimensions:
-        _require_member(dimension.id, "source_dataset_id", dimension.source_dataset_id, dataset_ids,
-                        "unknown_dataset", diagnostics)
-        _validate_relationship_fields(model, dimension.id, dimension.source_dataset_id, [dimension.field_id],
-                                      "field_id", diagnostics)
+        _validate_dimension_sources(model, dimension, dataset_ids, diagnostics)
         _require_members(dimension.id, "compatible_metric_ids", dimension.compatible_metric_ids, metric_ids,
                          "unknown_metric", diagnostics)
 
@@ -197,6 +194,58 @@ def _validate_relationship_fields(
     _require_members(object_id, field, field_ids, {item.id for item in dataset.fields}, "invalid_join_key", diagnostics)
 
 
+def _validate_dimension_sources(
+    model: SemanticModel, dimension: Dimension, dataset_ids: set[str], diagnostics: list[Diagnostic]
+) -> None:
+    """每个已记录来源都要能解析；问数和粒度仍以 source_dataset_id 这一处为准。"""
+    source_ids = list(dimension.source_dataset_ids)
+    if dimension.source_dataset_id not in source_ids:
+        _require_dimension_source(
+            model, dimension, dimension.source_dataset_id, "source_dataset_id", dataset_ids, diagnostics
+        )
+    for source_id in source_ids:
+        _require_dimension_source(model, dimension, source_id, "source_dataset_ids", dataset_ids, diagnostics)
+
+
+def _require_dimension_source(
+    model: SemanticModel,
+    dimension: Dimension,
+    source_id: str,
+    field: str,
+    dataset_ids: set[str],
+    diagnostics: list[Diagnostic],
+) -> None:
+    _require_member(dimension.id, field, source_id, dataset_ids, "unknown_dataset", diagnostics)
+    _validate_relationship_fields(model, dimension.id, source_id, [dimension.field_id], "field_id", diagnostics)
+
+
+def _validate_metric_sources(
+    model: SemanticModel, metric: Metric, dataset_ids: set[str], diagnostics: list[Diagnostic]
+) -> None:
+    """每个已记录来源都要能解析；问数仍以 source_dataset_id 这一处为准。"""
+    source_ids = list(metric.source_dataset_ids)
+    if metric.source_dataset_id not in source_ids:
+        _require_metric_source(model, metric, metric.source_dataset_id, "source_dataset_id", dataset_ids, diagnostics)
+    for source_id in source_ids:
+        _require_metric_source(model, metric, source_id, "source_dataset_ids", dataset_ids, diagnostics)
+
+
+def _require_metric_source(
+    model: SemanticModel,
+    metric: Metric,
+    source_id: str,
+    field: str,
+    dataset_ids: set[str],
+    diagnostics: list[Diagnostic],
+) -> None:
+    _require_member(metric.id, field, source_id, dataset_ids, "unknown_dataset", diagnostics)
+    _validate_relationship_fields(model, metric.id, source_id, metric.base_grain, "base_grain", diagnostics)
+    if metric.expression.field_id:
+        _validate_relationship_fields(
+            model, metric.id, source_id, [metric.expression.field_id], "expression.field_id", diagnostics
+        )
+
+
 def _validate_metric(
     model: SemanticModel,
     metric: Metric,
@@ -205,11 +254,7 @@ def _validate_metric(
     metric_ids: set[str],
     diagnostics: list[Diagnostic],
 ) -> None:
-    _require_member(metric.id, "source_dataset_id", metric.source_dataset_id, dataset_ids, "unknown_dataset", diagnostics)
-    _validate_relationship_fields(model, metric.id, metric.source_dataset_id, metric.base_grain, "base_grain", diagnostics)
-    if metric.expression.field_id:
-        _validate_relationship_fields(model, metric.id, metric.source_dataset_id, [metric.expression.field_id],
-                                      "expression.field_id", diagnostics)
+    _validate_metric_sources(model, metric, dataset_ids, diagnostics)
     _require_member(metric.id, "time_dimension_id", metric.time_dimension_id, dimension_ids,
                     "unknown_dimension", diagnostics, optional=True)
     _require_members(metric.id, "compatible_dimension_ids", metric.compatible_dimension_ids, dimension_ids,
