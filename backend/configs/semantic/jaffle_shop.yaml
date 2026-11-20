@@ -1,0 +1,238 @@
+id: jaffle_shop
+version: "1.0"
+domains:
+  - id: sales
+    name: 销售
+    description: Jaffle Shop 订单、客户和支付分析
+data_sources:
+  - id: jaffle_duckdb
+    name: Jaffle Shop DuckDB
+    dialect: duckdb
+business_objects:
+  - id: customer
+    name: Customer
+    domain_id: sales
+    candidate_key: customer_id
+    dataset_ids: [customer_mart, customer_staging, customer_source]
+    attributes:
+      - {id: customer_id, name: 客户标识, data_type: integer}
+      - {id: first_name, name: 名, data_type: string, restricted: true}
+      - {id: last_name, name: 姓, data_type: string, restricted: true}
+      - {id: first_order, name: 首次订单日期, data_type: date}
+      - {id: most_recent_order, name: 最近订单日期, data_type: date}
+      - {id: number_of_orders, name: 客户订单数, data_type: integer}
+      - {id: customer_lifetime_value, name: 客户生命周期价值, data_type: decimal}
+  - id: order
+    name: Order
+    domain_id: sales
+    candidate_key: order_id
+    dataset_ids: [order_mart, order_staging, order_source]
+    attributes:
+      - {id: order_id, name: 订单标识, data_type: integer}
+      - {id: customer_id, name: 客户标识, data_type: integer}
+      - {id: order_date, name: 订单日期, data_type: date}
+      - {id: status, name: 订单状态, data_type: string}
+      - {id: amount, name: 订单金额, data_type: decimal}
+  - id: payment
+    name: Payment
+    domain_id: sales
+    candidate_key: payment_id
+    dataset_ids: [payment_staging, payment_source]
+    attributes:
+      - {id: payment_id, name: 支付标识, data_type: integer}
+      - {id: order_id, name: 订单标识, data_type: integer}
+      - {id: payment_method, name: 支付方式, data_type: string}
+      - {id: amount, name: 支付金额, data_type: decimal}
+business_relationships:
+  - {id: customer_to_order, source_object_id: customer, target_object_id: order, cardinality: one_to_many, verification_status: proposed}
+  - {id: order_to_payment, source_object_id: order, target_object_id: payment, cardinality: one_to_many, verification_status: proposed}
+datasets:
+  - id: customer_mart
+    name: 客户汇总
+    domain_id: sales
+    dataset_type: dimension
+    grain: [customer_id]
+    primary_key: [customer_id]
+    exposure_policy: restricted
+    fields:
+      - {id: customer_id, name: 客户标识, data_type: integer}
+      - {id: first_name, name: 名, data_type: string, sensitive: true}
+      - {id: last_name, name: 姓, data_type: string, sensitive: true}
+      - {id: first_order, name: 首次订单日期, data_type: date}
+      - {id: most_recent_order, name: 最近订单日期, data_type: date}
+      - {id: number_of_orders, name: 客户订单数, data_type: integer}
+      - {id: customer_lifetime_value, name: 客户生命周期价值, data_type: decimal}
+    physical_mapping:
+      data_source_id: jaffle_duckdb
+      object_name: customers
+      object_type: table
+      column_mappings: {customer_id: customer_id, first_name: first_name, last_name: last_name, first_order: first_order, most_recent_order: most_recent_order, number_of_orders: number_of_orders, customer_lifetime_value: customer_lifetime_value}
+  - id: order_mart
+    name: 订单汇总
+    domain_id: sales
+    dataset_type: fact
+    grain: [order_id]
+    primary_key: [order_id]
+    exposure_policy: approved
+    fields:
+      - {id: order_id, name: 订单标识, data_type: integer}
+      - {id: customer_id, name: 客户标识, data_type: integer}
+      - {id: order_date, name: 订单日期, data_type: date, user_visible: true}
+      - {id: status, name: 订单状态, data_type: string, user_visible: true}
+      - {id: credit_card_amount, name: 信用卡金额, data_type: decimal}
+      - {id: coupon_amount, name: 优惠券金额, data_type: decimal}
+      - {id: bank_transfer_amount, name: 银行转账金额, data_type: decimal}
+      - {id: gift_card_amount, name: 礼品卡金额, data_type: decimal}
+      - {id: amount, name: 订单金额, data_type: decimal}
+    physical_mapping:
+      data_source_id: jaffle_duckdb
+      object_name: orders
+      object_type: table
+      column_mappings: {order_id: order_id, customer_id: customer_id, order_date: order_date, status: status, credit_card_amount: credit_card_amount, coupon_amount: coupon_amount, bank_transfer_amount: bank_transfer_amount, gift_card_amount: gift_card_amount, amount: amount}
+  - id: customer_staging
+    name: 客户标准化层
+    domain_id: sales
+    dataset_type: staging
+    grain: [customer_id]
+    primary_key: [customer_id]
+    fields:
+      - {id: customer_id, name: 客户标识, data_type: integer}
+      - {id: first_name, name: 名, data_type: string, sensitive: true}
+      - {id: last_name, name: 姓, data_type: string, sensitive: true}
+    physical_mapping:
+      data_source_id: jaffle_duckdb
+      object_name: stg_customers
+      object_type: view
+      column_mappings: {customer_id: customer_id, first_name: first_name, last_name: last_name}
+  - id: order_staging
+    name: 订单标准化层
+    domain_id: sales
+    dataset_type: staging
+    grain: [order_id]
+    primary_key: [order_id]
+    fields:
+      - {id: order_id, name: 订单标识, data_type: integer}
+      - {id: customer_id, name: 客户标识, data_type: integer}
+      - {id: order_date, name: 订单日期, data_type: date}
+      - {id: status, name: 订单状态, data_type: string}
+    physical_mapping:
+      data_source_id: jaffle_duckdb
+      object_name: stg_orders
+      object_type: view
+      column_mappings: {order_id: order_id, customer_id: customer_id, order_date: order_date, status: status}
+  - id: payment_staging
+    name: 支付标准化层
+    domain_id: sales
+    dataset_type: staging
+    grain: [payment_id]
+    primary_key: [payment_id]
+    fields:
+      - {id: payment_id, name: 支付标识, data_type: integer}
+      - {id: order_id, name: 订单标识, data_type: integer}
+      - {id: payment_method, name: 支付方式, data_type: string}
+      - {id: amount, name: 支付金额, data_type: decimal}
+    physical_mapping:
+      data_source_id: jaffle_duckdb
+      object_name: stg_payments
+      object_type: view
+      column_mappings: {payment_id: payment_id, order_id: order_id, payment_method: payment_method, amount: amount}
+  - id: customer_source
+    name: 客户原始层
+    domain_id: sales
+    dataset_type: source
+    grain: [id]
+    primary_key: [id]
+    fields: [{id: id, name: 原始标识, data_type: integer}, {id: first_name, name: 名, data_type: string, sensitive: true}, {id: last_name, name: 姓, data_type: string, sensitive: true}]
+    physical_mapping: {data_source_id: jaffle_duckdb, object_name: raw_customers, object_type: table, column_mappings: {id: id, first_name: first_name, last_name: last_name}}
+  - id: order_source
+    name: 订单原始层
+    domain_id: sales
+    dataset_type: source
+    grain: [id]
+    primary_key: [id]
+    fields: [{id: id, name: 原始标识, data_type: integer}, {id: user_id, name: 用户标识, data_type: integer}, {id: order_date, name: 订单日期, data_type: date}, {id: status, name: 订单状态, data_type: string}]
+    physical_mapping: {data_source_id: jaffle_duckdb, object_name: raw_orders, object_type: table, column_mappings: {id: id, user_id: user_id, order_date: order_date, status: status}}
+  - id: payment_source
+    name: 支付原始层
+    domain_id: sales
+    dataset_type: source
+    grain: [id]
+    primary_key: [id]
+    fields: [{id: id, name: 原始标识, data_type: integer}, {id: order_id, name: 订单标识, data_type: integer}, {id: payment_method, name: 支付方式, data_type: string}, {id: amount, name: 原始支付金额, data_type: integer}]
+    physical_mapping: {data_source_id: jaffle_duckdb, object_name: raw_payments, object_type: table, column_mappings: {id: id, order_id: order_id, payment_method: payment_method, amount: amount}}
+dataset_relationships:
+  - {id: order_mart_customer_mart, source_dataset_id: order_mart, target_dataset_id: customer_mart, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+  - {id: order_staging_customer_staging, source_dataset_id: order_staging, target_dataset_id: customer_staging, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+  - {id: order_source_customer_source, source_dataset_id: order_source, target_dataset_id: customer_source, source_fields: [user_id], target_fields: [id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+  - {id: payment_staging_order_staging, source_dataset_id: payment_staging, target_dataset_id: order_staging, source_fields: [order_id], target_fields: [order_id], cardinality: many_to_one, fanout_risk: true, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+  - {id: payment_source_order_source, source_dataset_id: payment_source, target_dataset_id: order_source, source_fields: [order_id], target_fields: [id], cardinality: many_to_one, fanout_risk: true, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+dimensions:
+  - {id: orders.order_date, name: 订单日期, source_dataset_id: order_mart, field_id: order_date, is_time: true, synonyms: [日期], user_visible: true}
+  - {id: orders.status, name: 订单状态, source_dataset_id: order_mart, field_id: status, synonyms: [状态], user_visible: true}
+  - {id: customers.first_order, name: 首次订单日期, source_dataset_id: customer_mart, field_id: first_order}
+  - {id: customers.most_recent_order, name: 最近订单日期, source_dataset_id: customer_mart, field_id: most_recent_order}
+metrics:
+  - id: orders.order_amount
+    name: 订单金额
+    definition: "订单主题空间中 amount 的合计"
+    expression: {kind: sum, field_id: amount}
+    source_dataset_id: order_mart
+    base_grain: [order_id]
+    time_dimension_id: orders.order_date
+    compatible_dimension_ids: [orders.order_date, orders.status]
+    additive: true
+    unit: source_amount
+    synonyms: [金额]
+    published: true
+  - id: orders.order_count
+    name: 订单笔数
+    definition: "每笔订单一笔，包含全部状态"
+    expression: {kind: count}
+    source_dataset_id: order_mart
+    base_grain: [order_id]
+    time_dimension_id: orders.order_date
+    compatible_dimension_ids: [orders.order_date, orders.status]
+    additive: true
+    unit: orders
+    synonyms: [订单数, 订单笔数]
+    published: true
+  - id: orders.credit_card_amount
+    name: 信用卡金额
+    definition: 信用卡支付金额
+    expression: {kind: sum, field_id: credit_card_amount}
+    source_dataset_id: order_mart
+    base_grain: [order_id]
+    time_dimension_id: orders.order_date
+    compatible_dimension_ids: [orders.order_date, orders.status]
+    unit: source_amount
+    published: true
+  - id: orders.coupon_amount
+    name: 优惠券金额
+    definition: 优惠券支付金额
+    expression: {kind: sum, field_id: coupon_amount}
+    source_dataset_id: order_mart
+    base_grain: [order_id]
+    time_dimension_id: orders.order_date
+    compatible_dimension_ids: [orders.order_date, orders.status]
+    unit: source_amount
+    published: true
+  - id: orders.bank_transfer_amount
+    name: 银行转账金额
+    definition: 银行转账支付金额
+    expression: {kind: sum, field_id: bank_transfer_amount}
+    source_dataset_id: order_mart
+    base_grain: [order_id]
+    time_dimension_id: orders.order_date
+    compatible_dimension_ids: [orders.order_date, orders.status]
+    unit: source_amount
+    published: true
+  - id: orders.gift_card_amount
+    name: 礼品卡金额
+    definition: 礼品卡支付金额
+    expression: {kind: sum, field_id: gift_card_amount}
+    source_dataset_id: order_mart
+    base_grain: [order_id]
+    time_dimension_id: orders.order_date
+    compatible_dimension_ids: [orders.order_date, orders.status]
+    unit: source_amount
+    published: true
