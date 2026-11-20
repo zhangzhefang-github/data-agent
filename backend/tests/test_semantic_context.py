@@ -13,6 +13,35 @@ MODEL_PATH = ROOT / "backend" / "configs" / "semantic" / "jaffle_shop.yaml"
 SPACES_PATH = ROOT / "backend" / "configs" / "semantic" / "spaces.yaml"
 
 
+def test_order_space_omits_a_metric_marked_pending_confirmation(tmp_path: Path):
+    model = load_semantic_model(MODEL_PATH)
+    pending = model.metric("orders.order_amount").model_copy(deep=True)
+    pending.id = "orders.pending_amount"
+    pending.name = "待确认金额"
+    pending.published = False
+    pending.pending_confirmation = True
+    model.metrics.append(pending)
+    spaces_path = tmp_path / "spaces.yaml"
+    spaces_path.write_text(
+        SPACES_PATH.read_text().replace(
+            "      - orders.order_amount\n",
+            "      - orders.order_amount\n      - orders.pending_amount\n",
+            1,
+        )
+    )
+
+    context = build_semantic_context("sales", "orders", model=model, spaces_path=spaces_path)
+
+    assert [metric.id for metric in context.business.metrics] == [
+        "orders.order_amount",
+        "orders.order_count",
+        "orders.credit_card_amount",
+        "orders.coupon_amount",
+        "orders.bank_transfer_amount",
+        "orders.gift_card_amount",
+    ]
+
+
 def test_pending_customer_measures_stay_out_of_the_order_space_query_metrics():
     context = build_semantic_context(
         "sales", "orders", model=load_semantic_model(MODEL_PATH), spaces_path=SPACES_PATH

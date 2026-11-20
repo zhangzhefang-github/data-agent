@@ -38,6 +38,12 @@ def validate_semantic_model(
         _require_member(relationship.id, "target_object_id", relationship.target_object_id, object_ids,
                         "unknown_business_object", diagnostics)
 
+    for record in model.dataset_lineage:
+        _require_member(record.id, "source_dataset_id", record.source_dataset_id, dataset_ids,
+                        "unknown_dataset", diagnostics)
+        _require_member(record.id, "target_dataset_id", record.target_dataset_id, dataset_ids,
+                        "unknown_dataset", diagnostics)
+
     for relationship in model.dataset_relationships:
         _require_member(relationship.id, "source_dataset_id", relationship.source_dataset_id, dataset_ids,
                         "unknown_dataset", diagnostics)
@@ -154,6 +160,7 @@ def _validate_unique_ids(model: SemanticModel, diagnostics: list[Diagnostic]) ->
         "business_objects": model.business_objects,
         "business_relationships": model.business_relationships,
         "datasets": model.datasets,
+        "dataset_lineage": model.dataset_lineage,
         "dataset_relationships": model.dataset_relationships,
         "metrics": model.metrics,
         "dimensions": model.dimensions,
@@ -197,53 +204,67 @@ def _validate_relationship_fields(
 def _validate_dimension_sources(
     model: SemanticModel, dimension: Dimension, dataset_ids: set[str], diagnostics: list[Diagnostic]
 ) -> None:
-    """每个已记录来源都要能解析；问数和粒度仍以 source_dataset_id 这一处为准。"""
-    source_ids = list(dimension.source_dataset_ids)
-    if dimension.source_dataset_id not in source_ids:
-        _require_dimension_source(
-            model, dimension, dimension.source_dataset_id, "source_dataset_id", dataset_ids, diagnostics
-        )
-    for source_id in source_ids:
-        _require_dimension_source(model, dimension, source_id, "source_dataset_ids", dataset_ids, diagnostics)
-
-
-def _require_dimension_source(
-    model: SemanticModel,
-    dimension: Dimension,
-    source_id: str,
-    field: str,
-    dataset_ids: set[str],
-    diagnostics: list[Diagnostic],
-) -> None:
-    _require_member(dimension.id, field, source_id, dataset_ids, "unknown_dataset", diagnostics)
-    _validate_relationship_fields(model, dimension.id, source_id, [dimension.field_id], "field_id", diagnostics)
+    _validate_recorded_sources(
+        model,
+        dimension.id,
+        dimension.source_dataset_id,
+        dimension.source_dataset_ids,
+        dataset_ids,
+        diagnostics,
+        [("field_id", [dimension.field_id])],
+    )
 
 
 def _validate_metric_sources(
     model: SemanticModel, metric: Metric, dataset_ids: set[str], diagnostics: list[Diagnostic]
 ) -> None:
-    """每个已记录来源都要能解析；问数仍以 source_dataset_id 这一处为准。"""
-    source_ids = list(metric.source_dataset_ids)
-    if metric.source_dataset_id not in source_ids:
-        _require_metric_source(model, metric, metric.source_dataset_id, "source_dataset_id", dataset_ids, diagnostics)
-    for source_id in source_ids:
-        _require_metric_source(model, metric, source_id, "source_dataset_ids", dataset_ids, diagnostics)
+    field_checks = [("base_grain", list(metric.base_grain))]
+    if metric.expression.field_id:
+        field_checks.append(("expression.field_id", [metric.expression.field_id]))
+    _validate_recorded_sources(
+        model,
+        metric.id,
+        metric.source_dataset_id,
+        metric.source_dataset_ids,
+        dataset_ids,
+        diagnostics,
+        field_checks,
+    )
 
 
-def _require_metric_source(
+def _validate_recorded_sources(
     model: SemanticModel,
-    metric: Metric,
+    owner_id: str,
+    source_dataset_id: str,
+    source_dataset_ids: list[str],
+    dataset_ids: set[str],
+    diagnostics: list[Diagnostic],
+    field_checks: list[tuple[str, list[str]]],
+) -> None:
+    """每个已记录来源都要能解析；问数仍以 source_dataset_id 这一处为准。"""
+    recorded = list(source_dataset_ids)
+    if source_dataset_id not in recorded:
+        _require_recorded_source(
+            model, owner_id, source_dataset_id, "source_dataset_id", dataset_ids, diagnostics, field_checks
+        )
+    for source_id in recorded:
+        _require_recorded_source(
+            model, owner_id, source_id, "source_dataset_ids", dataset_ids, diagnostics, field_checks
+        )
+
+
+def _require_recorded_source(
+    model: SemanticModel,
+    owner_id: str,
     source_id: str,
     field: str,
     dataset_ids: set[str],
     diagnostics: list[Diagnostic],
+    field_checks: list[tuple[str, list[str]]],
 ) -> None:
-    _require_member(metric.id, field, source_id, dataset_ids, "unknown_dataset", diagnostics)
-    _validate_relationship_fields(model, metric.id, source_id, metric.base_grain, "base_grain", diagnostics)
-    if metric.expression.field_id:
-        _validate_relationship_fields(
-            model, metric.id, source_id, [metric.expression.field_id], "expression.field_id", diagnostics
-        )
+    _require_member(owner_id, field, source_id, dataset_ids, "unknown_dataset", diagnostics)
+    for field_name, members in field_checks:
+        _validate_relationship_fields(model, owner_id, source_id, members, field_name, diagnostics)
 
 
 def _validate_metric(

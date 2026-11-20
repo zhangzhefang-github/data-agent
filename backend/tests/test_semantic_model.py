@@ -48,6 +48,40 @@ def test_published_model_marks_raw_to_staging_lineage_confirmed():
     }
 
 
+def test_lineage_rejects_missing_dataset_references_and_blocks_publish():
+    model = load_semantic_model(MODEL_PATH)
+    model.dataset_lineage[0].source_dataset_id = "missing_source"
+    model.dataset_lineage[1].target_dataset_id = "missing_target"
+
+    result = validate_semantic_model(model)
+
+    assert {(item.object_id, item.field, item.code) for item in result.errors} == {
+        ("customer_source_to_staging", "source_dataset_id", "unknown_dataset"),
+        ("order_source_to_staging", "target_dataset_id", "unknown_dataset"),
+    }
+    for diagnostic in result.errors:
+        assert diagnostic.reason
+        assert diagnostic.suggestion
+    with pytest.raises(ValueError, match="not published"):
+        SemanticModelRegistry().publish(model)
+
+
+def test_lineage_rejects_duplicate_ids_and_blocks_publish():
+    model = load_semantic_model(MODEL_PATH)
+    duplicate = model.dataset_lineage[0].model_copy(deep=True)
+    model.dataset_lineage.append(duplicate)
+
+    result = validate_semantic_model(model)
+
+    assert [(item.object_id, item.field, item.code) for item in result.errors] == [
+        ("customer_source_to_staging", "dataset_lineage", "duplicate_id")
+    ]
+    assert result.errors[0].reason
+    assert result.errors[0].suggestion
+    with pytest.raises(ValueError, match="not published"):
+        SemanticModelRegistry().publish(model)
+
+
 def test_published_model_marks_mart_lineage_proposed_not_confirmed():
     registry = SemanticModelRegistry()
     registry.publish(load_semantic_model(MODEL_PATH))
