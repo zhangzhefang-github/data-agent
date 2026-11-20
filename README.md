@@ -8,8 +8,11 @@ Sales Space 的本地问数工作台使用 OpenAI Agents SDK、FastAPI、React �
 python -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
-export OPENAI_API_KEY=你的密钥
-export OPENAI_MODEL=gpt-4.1-mini
+cp .env.example .env
+# 编辑 .env，填写 OPENAI_API_KEY 和服务商提供的 OPENAI_MODEL
+set -a
+source .env
+set +a
 cd backend
 uvicorn app.main:app --reload
 ```
@@ -23,6 +26,8 @@ npm run dev
 ```
 
 打开 http://127.0.0.1:5173，输入“查询今年各城市的销售额”。服务自动创建 SQLite 示例数据，业务查询以只读模式打开数据库。
+
+API 地址由 `OPENAI_BASE_URL` 配置，默认使用 `https://api.agicto.cn/v1`。`.env` 文件不会自动加载，每次在启动后端的终端执行上面的 `source .env`。模型名称须使用该地址支持的模型。`.env` 已加入 Git 忽略列表，请将密钥保存在此文件中。
 
 ```sh
 PYTHONPATH=backend pytest backend/tests

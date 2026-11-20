@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
+
 import yaml
 from agents import Agent, Runner, function_tool
 from fastapi import FastAPI
