@@ -6,6 +6,7 @@ import pytest
 
 from app.semantic.catalog import profile_jaffle_shop
 from app.semantic.loader import load_semantic_model
+from app.semantic.models import MetricFilter
 from app.semantic.registry import SemanticModelRegistry
 from app.semantic.validator import validate_dataset_join, validate_semantic_model
 
@@ -139,6 +140,30 @@ def test_join_validation_rejects_unauthorized_ambiguous_and_unsafe_fanout_relati
         preaggregated_source=True,
     )
     assert preaggregated.valid
+
+
+def test_validator_rejects_order_metric_compatible_with_customer_grain_dimension():
+    model = load_semantic_model(MODEL_PATH)
+    model.metric("orders.order_count").compatible_dimension_ids = ["customers.first_order"]
+
+    result = validate_semantic_model(model)
+
+    assert [(item.object_id, item.field, item.code) for item in result.errors] == [
+        ("orders.order_count", "compatible_dimension_ids", "incompatible_grain")
+    ]
+
+
+def test_validator_rejects_customer_grain_default_filter_on_order_metric():
+    model = load_semantic_model(MODEL_PATH)
+    model.metric("orders.order_amount").default_filters = [
+        MetricFilter(dimension_id="customers.first_order", operator="eq", value="2018-01-01")
+    ]
+
+    result = validate_semantic_model(model)
+
+    assert [(item.object_id, item.field, item.code) for item in result.errors] == [
+        ("orders.order_amount", "default_filters.dimension_id", "incompatible_grain")
+    ]
 
 
 def test_model_validator_requires_many_to_many_relationships_to_disclose_fanout_risk():

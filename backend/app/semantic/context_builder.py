@@ -11,6 +11,10 @@ from app.semantic.loader import load_semantic_model
 from app.semantic.models import Dataset, Dimension, Metric, SemanticModel
 
 
+# Query IR 目前只编译 sum 和 count。规范模型保留更宽的表达式，Space 不能把其余种类放进运行时。
+_QUERY_RUNTIME_EXPRESSION_KINDS = {"sum", "count"}
+
+
 class SpaceDefinition(BaseModel):
     id: str
     domain_id: str
@@ -205,6 +209,11 @@ def _validate_space_references(space: SpaceDefinition, model: SemanticModel) -> 
         missing = sorted(set(identifiers) - available)
         if missing:
             raise ValueError(f"Semantic space {space.id} references unknown {kind}: {missing[0]}")
+    metrics_by_id = {metric.id: metric for metric in model.metrics}
+    for metric_id in space.metric_ids:
+        kind = metrics_by_id[metric_id].expression.kind
+        if kind not in _QUERY_RUNTIME_EXPRESSION_KINDS:
+            raise ValueError(f"Semantic space {space.id} authorizes unsupported expression kind: {kind}")
     for alias, metric_id in space.metric_aliases.items():
         if metric_id not in space.metric_ids:
             raise ValueError(f"Semantic space {space.id} maps alias {alias} to an unauthorized metric")

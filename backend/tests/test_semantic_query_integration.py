@@ -135,3 +135,18 @@ def test_sales_catalog_keeps_its_existing_order_count_meaning():
 
     assert catalog["metrics"]["order_count"]["description"] == "有效订单数"
     assert "metric_input_aliases" not in catalog
+
+
+def test_orders_runtime_rejects_a_model_that_cannot_be_published(tmp_path: Path):
+    semantic = tmp_path / "backend" / "configs" / "semantic"
+    semantic.mkdir(parents=True)
+    model_text = (ROOT / "backend" / "configs" / "semantic" / "jaffle_shop.yaml").read_text()
+    semantic.joinpath("jaffle_shop.yaml").write_text(
+        model_text.replace("primary_key: [order_id]", "primary_key: [not_a_field]", 1)
+    )
+    semantic.joinpath("spaces.yaml").write_text(
+        (ROOT / "backend" / "configs" / "semantic" / "spaces.yaml").read_text()
+    )
+
+    with pytest.raises(ValueError, match="not published"):
+        load_catalog(tmp_path, "orders")
