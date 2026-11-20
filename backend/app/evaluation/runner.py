@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from datetime import date, datetime
@@ -91,13 +92,36 @@ def run_deterministic():
     return {'mode': 'deterministic', 'clock': dataset['clock'], 'cases': cases}
 
 
-def run_live():
+def run_live(case_id=None):
     dataset = load_dataset()
+    if case_id is not None:
+        dataset['cases'] = [case for case in dataset['cases'] if case['id'] == case_id]
+        if not dataset['cases']:
+            raise ValueError('未知评测用例')
     if not os.getenv('OPENAI_API_KEY'):
         return {'mode': 'live', 'clock': dataset['clock'], 'cases': [
             {'id': case['id'], 'status': 'skipped', 'failure_stage': 'configuration', 'reason': 'OPENAI_API_KEY 未设置'}
             for case in dataset['cases']
         ]}
+    if case_id is None:
+        reports = []
+        for case in dataset['cases']:
+            try:
+                process = subprocess.run(
+                    [sys.executable, '-m', 'app.evaluation.runner', '--live', '--case', case['id']],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if process.returncode not in (0, 1):
+                    raise ValueError('评测进程异常退出')
+                report = json.loads(process.stdout)['cases'][0]
+            except subprocess.TimeoutExpired:
+                report = {'id': case['id'], 'status': 'failed', 'failure_stage': 'semantic_resolution', 'reason': '模型请求超过60秒'}
+            except (ValueError, KeyError, IndexError):
+                report = {'id': case['id'], 'status': 'failed', 'failure_stage': 'semantic_resolution', 'reason': '评测进程未返回有效结果'}
+            reports.append(report)
+            print(json.dumps(report, ensure_ascii=False), file=sys.stderr, flush=True)
+        return {'mode': 'live', 'clock': dataset['clock'], 'cases': reports}
+
     from fastapi.testclient import TestClient
     from app import main
 
@@ -169,8 +193,9 @@ def send(client, question, conversation_id=None):
 def main():
     parser = argparse.ArgumentParser(description='Run the Sales Space Golden Dataset.')
     parser.add_argument('--live', action='store_true', help='调用真实模型评测自然语言解析')
+    parser.add_argument('--case', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    report = run_live() if args.live else run_deterministic()
+    report = run_live(args.case) if args.live else run_deterministic()
     counts = {status: sum(case['status'] == status for case in report['cases']) for status in ('passed', 'failed', 'skipped')}
     report['summary'] = counts
     print(json.dumps(report, ensure_ascii=False, indent=2))
