@@ -5,6 +5,7 @@ import os
 import re
 from datetime import date, datetime
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
@@ -53,6 +54,18 @@ def spaces():
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    rating: Literal['correct', 'incorrect']
+
+
+@app.post('/api/feedback')
+def submit_feedback(request: FeedbackRequest):
+    if not conversations.save_feedback(CONVERSATIONS, request.message_id, request.rating):
+        raise HTTPException(status_code=404, detail='回答不存在')
+    return {'message_id': request.message_id, 'rating': request.rating}
 
 
 @app.get("/api/conversations")
