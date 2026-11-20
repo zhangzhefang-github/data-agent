@@ -1,1 +1,1 @@
-"""Canonical semantic model and read-only catalog inputs."""
+"""Canonical semantic model, authorized Context, and read-only catalog inputs."""
