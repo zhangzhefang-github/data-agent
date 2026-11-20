@@ -55,7 +55,7 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
     date_dimension = next(dimension for dimension in context.business.dimensions if dimension.is_time)
     return {
         "id": context.space_id,
-        "name": context.space_id == "orders" and "订单分析" or context.space_id,
+        "name": context.space_name,
         "description": "由已发布规范语义模型授权的查询目录",
         "models": {
             model.id: {

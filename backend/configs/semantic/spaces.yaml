@@ -1,7 +1,7 @@
 spaces:
   - id: orders
     domain_id: sales
-    name: 订单分析
+    name: 订单主题空间
     metric_ids:
       - orders.order_amount
       - orders.order_count

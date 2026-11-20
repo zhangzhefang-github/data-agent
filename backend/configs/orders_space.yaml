@@ -1,6 +1,6 @@
 space:
   id: orders
-  name: 订单分析
+  name: 订单主题空间
   description: 按订单日期和状态分析订单金额与订单量
   models:
     orders:

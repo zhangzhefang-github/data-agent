@@ -205,6 +205,39 @@ def test_terms_use_catalog_synonyms(monkeypatch, tmp_path):
     assert matches == [{"sales_amount": "销售额", "city": "城市"}]
 
 
+def test_orders_catalog_tool_returns_the_question_context(monkeypatch, tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from agents.tool_context import ToolContext
+    from app import main
+    from app.query import load_catalog
+
+    monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
+    monkeypatch.setattr(main, "CATALOG", load_catalog(main.ROOT, "orders"))
+    catalogs = []
+
+    class Reply:
+        def __init__(self, agent):
+            self.agent = agent
+
+        async def stream_events(self):
+            tool = next(tool for tool in self.agent.tools if tool.name == "get_semantic_catalog")
+            result = await tool.on_invoke_tool(
+                ToolContext(None, tool_name=tool.name, tool_call_id="1", tool_arguments="{}"),
+                "{}",
+            )
+            catalogs.append(json.loads(result))
+            yield SimpleNamespace(type="raw_response_event", data=SimpleNamespace(type="response.output_text.delta", delta="完成"))
+
+    monkeypatch.setattr(main.Runner, "run_streamed", lambda agent, *args, **kwargs: Reply(agent))
+    with TestClient(app) as client:
+        client.post("/api/chat/stream", json={"message": "order_rows"})
+
+    assert set(catalogs[0]["metrics"]) == {"order_rows"}
+    assert set(catalogs[0]["dimensions"]) == {"order_date"}
+
+
 def test_orders_space_normalizes_canonical_query_ids_before_saving_history(monkeypatch, tmp_path):
     import json
     from types import SimpleNamespace

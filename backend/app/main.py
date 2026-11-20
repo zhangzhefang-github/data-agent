@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, space_instructions
+from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
     set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
@@ -143,14 +143,15 @@ async def chat(request: ChatRequest):
         @function_tool
         def get_semantic_catalog() -> str:
             """Get allowed sales metrics and dimensions."""
-            return json.dumps(CATALOG, ensure_ascii=False)
+            return json.dumps(question_catalog(ROOT, CATALOG["id"], request.message), ensure_ascii=False)
 
         @function_tool
         def resolve_business_terms(question: str) -> str:
             """Find sales terms and dimensions relevant to a user question."""
+            catalog = question_catalog(ROOT, CATALOG["id"], question)
             matches = {}
             for category in ("metrics", "dimensions"):
-                for identifier, item in CATALOG[category].items():
+                for identifier, item in catalog[category].items():
                     terms = [identifier, item["name"], *item.get("synonyms", [])]
                     if any(term.lower() in question.lower() for term in terms):
                         matches[identifier] = item["name"]

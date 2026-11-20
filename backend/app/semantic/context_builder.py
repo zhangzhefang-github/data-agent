@@ -112,6 +112,7 @@ class SemanticContext(BaseModel):
     model_version: str
     domain_id: str
     space_id: str
+    space_name: str
     business: BusinessSemanticContext
     sql: SqlSemanticContext
     internal: InternalSemanticContext = Field(exclude=True)
@@ -152,10 +153,21 @@ def build_semantic_context(
 
     selected_metrics = [metrics_by_id[identifier] for identifier in space.metric_ids if identifier in selected_metric_ids]
     selected_dimensions = [
-        dimensions_by_id[identifier] for identifier in space.dimension_ids if identifier in selected_dimension_ids
+        dimensions_by_id[identifier]
+        for identifier in space.dimension_ids
+        if identifier in selected_dimension_ids and dimensions_by_id[identifier].user_visible
     ]
     selected_dataset_ids = _context_dataset_ids(selected_metrics, selected_dimensions, space)
-    selected_datasets = [dataset for dataset in model.datasets if dataset.id in selected_dataset_ids]
+    selected_datasets = [
+        dataset for dataset in model.datasets
+        if dataset.id in selected_dataset_ids and dataset.exposure_policy == "approved"
+    ]
+    approved_dataset_ids = {dataset.id for dataset in selected_datasets}
+    selected_metrics = [metric for metric in selected_metrics if metric.source_dataset_id in approved_dataset_ids]
+    selected_dimensions = [
+        dimension for dimension in selected_dimensions if dimension.source_dataset_id in approved_dataset_ids
+    ]
+    selected_dataset_ids = approved_dataset_ids
     selected_objects = _context_objects(model, selected_dataset_ids)
     selected_relationships = [
         relationship
@@ -171,6 +183,7 @@ def build_semantic_context(
         model_version=model.version,
         domain_id=domain_id,
         space_id=space.id,
+        space_name=space.name,
         business=BusinessSemanticContext(
             objects=selected_objects,
             metrics=[_context_metric(metric) for metric in selected_metrics],
