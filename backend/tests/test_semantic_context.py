@@ -4,6 +4,8 @@ import pytest
 
 from app.semantic.context_builder import build_semantic_context
 from app.semantic.loader import load_semantic_model
+from app.semantic.models import MetricExpression
+from app.semantic.validator import validate_semantic_model
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,6 +68,31 @@ def test_orders_context_accepts_legacy_alias_when_selecting_a_metric():
 
     assert [metric.id for metric in context.business.metrics] == ["orders.order_count"]
     assert [dimension.id for dimension in context.business.dimensions] == ["orders.order_date"]
+
+
+def test_space_rejects_expression_kinds_the_query_runtime_cannot_compile(tmp_path: Path):
+    model = load_semantic_model(MODEL_PATH)
+    derived = model.metric("orders.order_amount").model_copy(deep=True)
+    derived.id = "orders.amount_per_order"
+    derived.expression = MetricExpression(
+        kind="ratio",
+        numerator_metric_id="orders.order_amount",
+        denominator_metric_id="orders.order_count",
+    )
+    model.metrics.append(derived)
+    assert validate_semantic_model(model).valid
+
+    spaces_path = tmp_path / "spaces.yaml"
+    spaces_path.write_text(
+        SPACES_PATH.read_text().replace(
+            "      - orders.order_amount\n",
+            "      - orders.order_amount\n      - orders.amount_per_order\n",
+            1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="unsupported expression kind"):
+        build_semantic_context("sales", "orders", model=model, spaces_path=spaces_path)
 
 
 @pytest.mark.parametrize(

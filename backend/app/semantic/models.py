@@ -173,4 +173,3 @@ class SemanticModel(BaseModel):
 
     def metric(self, identifier: str) -> Metric:
         return next(item for item in self.metrics if item.id == identifier)
-

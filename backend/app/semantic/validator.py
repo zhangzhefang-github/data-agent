@@ -214,6 +214,7 @@ def _validate_metric(
                     "unknown_dimension", diagnostics, optional=True)
     _require_members(metric.id, "compatible_dimension_ids", metric.compatible_dimension_ids, dimension_ids,
                      "unknown_dimension", diagnostics)
+    _validate_grain_compatibility(model, metric, diagnostics)
     references = [item for item in [metric.expression.metric_id, metric.expression.numerator_metric_id,
                                      metric.expression.denominator_metric_id] if item]
     _require_members(metric.id, "expression", references, metric_ids, "unknown_metric", diagnostics)
@@ -223,6 +224,40 @@ def _validate_metric(
     if metric.published and metric.source_dataset_id not in dataset_ids:
         _error(diagnostics, metric.id, "published", "unpublishable_metric", "Published metrics require a valid source dataset.",
                "Correct the source dataset or set published to false.")
+
+
+def _validate_grain_compatibility(model: SemanticModel, metric: Metric, diagnostics: list[Diagnostic]) -> None:
+    metric_grain = tuple(metric.base_grain)
+    for dimension_id in metric.compatible_dimension_ids:
+        if _dimension_grain(model, dimension_id) not in {None, metric_grain}:
+            _error(
+                diagnostics,
+                metric.id,
+                "compatible_dimension_ids",
+                "incompatible_grain",
+                "A metric can only be grouped by dimensions at its base grain.",
+                "Remove the dimension or define the metric at that dimension's grain.",
+            )
+    for filter_ in metric.default_filters:
+        if _dimension_grain(model, filter_.dimension_id) not in {None, metric_grain}:
+            _error(
+                diagnostics,
+                metric.id,
+                "default_filters.dimension_id",
+                "incompatible_grain",
+                "A metric can only filter by dimensions at its base grain.",
+                "Remove the default filter or define the metric at that dimension's grain.",
+            )
+
+
+def _dimension_grain(model: SemanticModel, dimension_id: str) -> tuple[str, ...] | None:
+    dimension = next((item for item in model.dimensions if item.id == dimension_id), None)
+    if dimension is None:
+        return None
+    dataset = next((item for item in model.datasets if item.id == dimension.source_dataset_id), None)
+    if dataset is None:
+        return None
+    return tuple(dataset.grain)
 
 
 def _validate_metric_cycles(metrics: list[Metric], diagnostics: list[Diagnostic]) -> None:
