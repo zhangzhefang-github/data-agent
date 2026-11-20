@@ -1,0 +1,30 @@
+spaces:
+  - id: orders
+    domain_id: sales
+    name: 订单分析
+    metric_ids:
+      - orders.order_amount
+      - orders.order_count
+      - orders.credit_card_amount
+      - orders.coupon_amount
+      - orders.bank_transfer_amount
+      - orders.gift_card_amount
+    dimension_ids:
+      - orders.order_date
+      - orders.status
+    dataset_ids:
+      - order_mart
+    metric_aliases:
+      order_rows: orders.order_count
+    dimension_values:
+      orders.status:
+        已下单: placed
+        已发货: shipped
+        已完成: completed
+        退货中: return_pending
+        已退货: returned
+    filter_rules:
+      - 订单日期以 Asia/Shanghai 业务日解释。
+      - 订单状态仅使用 Space 授权的状态字典。
+    sql_examples:
+      - 按订单状态汇总订单金额和订单笔数。
