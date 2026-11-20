@@ -69,6 +69,87 @@ def validate_semantic_model(
     return ValidationResult(valid=not errors, errors=errors, warnings=warnings)
 
 
+def validate_dataset_join(
+    model: SemanticModel,
+    source_dataset_id: str,
+    target_dataset_id: str,
+    *,
+    allowed_relationship_ids: set[str],
+    preaggregated_source: bool = False,
+) -> ValidationResult:
+    """Validate one explicitly authorized dataset join before query planning.
+
+    Profiling establishes evidence about a relationship. It does not make that
+    relationship available to a query. A caller has to authorize a confirmed
+    relationship and make a fanout-safe aggregation decision.
+    """
+    diagnostics: list[Diagnostic] = []
+    direct_relationships = [
+        relationship
+        for relationship in model.dataset_relationships
+        if {relationship.source_dataset_id, relationship.target_dataset_id}
+        == {source_dataset_id, target_dataset_id}
+    ]
+    candidates = [
+        relationship for relationship in direct_relationships if relationship.id in allowed_relationship_ids
+    ]
+    if not candidates:
+        code = "unauthorized_relationship" if direct_relationships else "missing_relationship"
+        reason = (
+            "The requested datasets have a declared relationship, but it is not authorized for this query."
+            if direct_relationships
+            else "The requested datasets do not have a declared direct relationship."
+        )
+        _error(
+            diagnostics,
+            f"{source_dataset_id}->{target_dataset_id}",
+            "relationship",
+            code,
+            reason,
+            "Authorize one confirmed relationship for this query." if direct_relationships else "Declare and validate a relationship first.",
+        )
+        return _result(diagnostics)
+
+    unconfirmed = [relationship for relationship in candidates if relationship.verification_status != "confirmed"]
+    if unconfirmed:
+        for relationship in unconfirmed:
+            _error(
+                diagnostics,
+                relationship.id,
+                "verification_status",
+                "unconfirmed_relationship",
+                "Only confirmed relationships may be used in a query.",
+                "Obtain a trusted data-model definition or business confirmation before authorizing this join.",
+            )
+        return _result(diagnostics)
+
+    highest_priority = min(relationship.priority for relationship in candidates)
+    selected = [relationship for relationship in candidates if relationship.priority == highest_priority]
+    if len(selected) != 1:
+        for relationship in selected:
+            _error(
+                diagnostics,
+                relationship.id,
+                "priority",
+                "ambiguous_join_path",
+                "More than one authorized, confirmed relationship has the same highest priority.",
+                "Choose one relationship or assign distinct priorities.",
+            )
+        return _result(diagnostics)
+
+    relationship = selected[0]
+    if relationship.fanout_risk and not preaggregated_source:
+        _error(
+            diagnostics,
+            relationship.id,
+            "fanout_risk",
+            "fanout_risk",
+            "This relationship can multiply source rows before aggregation.",
+            "Pre-aggregate the source to its declared grain before joining.",
+        )
+    return _result(diagnostics)
+
+
 def _validate_unique_ids(model: SemanticModel, diagnostics: list[Diagnostic]) -> None:
     groups = {
         "domains": model.domains,
@@ -201,6 +282,12 @@ def _require_members(
 ) -> None:
     for value in values:
         _require_member(object_id, field, value, allowed, code, diagnostics)
+
+
+def _result(diagnostics: list[Diagnostic]) -> ValidationResult:
+    errors = [item for item in diagnostics if item.severity == "error"]
+    warnings = [item for item in diagnostics if item.severity == "warning"]
+    return ValidationResult(valid=not errors, errors=errors, warnings=warnings)
 
 
 def _error(diagnostics: list[Diagnostic], object_id: str, field: str, code: str, reason: str, suggestion: str) -> None:

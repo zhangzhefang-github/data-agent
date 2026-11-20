@@ -7,7 +7,7 @@ import pytest
 from app.semantic.catalog import profile_jaffle_shop
 from app.semantic.loader import load_semantic_model
 from app.semantic.registry import SemanticModelRegistry
-from app.semantic.validator import validate_semantic_model
+from app.semantic.validator import validate_dataset_join, validate_semantic_model
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -76,3 +76,77 @@ def test_real_catalog_validates_every_physical_mapping_when_available():
     result = validate_semantic_model(load_semantic_model(MODEL_PATH), catalog)
 
     assert result.valid
+
+
+def test_profiled_relationship_cannot_be_used_until_confirmed_and_authorized():
+    model = load_semantic_model(MODEL_PATH)
+
+    result = validate_dataset_join(
+        model,
+        "order_mart",
+        "customer_mart",
+        allowed_relationship_ids={"order_mart_customer_mart"},
+    )
+
+    assert not result.valid
+    assert {diagnostic.code for diagnostic in result.errors} == {"unconfirmed_relationship"}
+
+    model.dataset_relationships[0].verification_status = "confirmed"
+    result = validate_dataset_join(
+        model,
+        "order_mart",
+        "customer_mart",
+        allowed_relationship_ids={"order_mart_customer_mart"},
+    )
+
+    assert result.valid
+
+
+def test_join_validation_rejects_unauthorized_ambiguous_and_unsafe_fanout_relationships():
+    model = load_semantic_model(MODEL_PATH)
+    relationship = model.dataset_relationships[0]
+    relationship.verification_status = "confirmed"
+
+    unauthorized = validate_dataset_join(model, "order_mart", "customer_mart", allowed_relationship_ids=set())
+    assert {diagnostic.code for diagnostic in unauthorized.errors} == {"unauthorized_relationship"}
+
+    duplicate = relationship.model_copy(deep=True)
+    duplicate.id = "alternate_order_customer"
+    model.dataset_relationships.append(duplicate)
+    ambiguous = validate_dataset_join(
+        model,
+        "order_mart",
+        "customer_mart",
+        allowed_relationship_ids={relationship.id, duplicate.id},
+    )
+    assert {diagnostic.code for diagnostic in ambiguous.errors} == {"ambiguous_join_path"}
+
+    payment_relationship = next(item for item in model.dataset_relationships if item.id == "payment_staging_order_staging")
+    payment_relationship.verification_status = "confirmed"
+    unsafe = validate_dataset_join(
+        model,
+        "payment_staging",
+        "order_staging",
+        allowed_relationship_ids={payment_relationship.id},
+    )
+    assert {diagnostic.code for diagnostic in unsafe.errors} == {"fanout_risk"}
+
+    preaggregated = validate_dataset_join(
+        model,
+        "payment_staging",
+        "order_staging",
+        allowed_relationship_ids={payment_relationship.id},
+        preaggregated_source=True,
+    )
+    assert preaggregated.valid
+
+
+def test_model_validator_requires_many_to_many_relationships_to_disclose_fanout_risk():
+    model = load_semantic_model(MODEL_PATH)
+    relationship = model.dataset_relationships[0]
+    relationship.cardinality = "many_to_many"
+    relationship.fanout_risk = False
+
+    result = validate_semantic_model(model)
+
+    assert {diagnostic.code for diagnostic in result.errors} >= {"missing_fanout_risk"}
