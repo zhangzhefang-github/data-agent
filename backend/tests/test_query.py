@@ -177,7 +177,7 @@ def test_orders_space_counts_rows_and_sums_amount(tmp_path: Path):
             ("2025-12-31", "completed", 100, 100, 0, 0, 0),
         ])
     catalog = yaml.safe_load((Path(__file__).parents[1] / "configs" / "orders_space.yaml").read_text())["space"]
-    result = execute_query(path, Query(metrics=["order_count", "order_amount"], dimensions=["status"]), date(2026, 6, 1), catalog)
+    result = execute_query(path, Query(metrics=["order_rows", "order_amount"], dimensions=["status"]), date(2026, 6, 1), catalog)
     assert result["rows"] == [["completed", 1, 10], ["returned", 1, 5]]
     assert "COUNT(*)" in result["sql"]
     assert "SUM(\"amount\")" in result["sql"]

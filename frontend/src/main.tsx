@@ -12,6 +12,7 @@ function App() {
   const [history, setHistory] = useState<ConversationSummary[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [spaceName, setSpaceName] = useState('销售分析')
+  const [spaceId, setSpaceId] = useState('sales')
   const [spaceDetail, setSpaceDetail] = useState('以自然语言探索销售数据')
   async function loadHistory() {
     const response = await fetch('/api/conversations')
@@ -23,6 +24,7 @@ function App() {
       if (!response.ok) return
       const spaces = await response.json()
       if (spaces[0]?.name) setSpaceName(spaces[0].name)
+      if (spaces[0]?.id) setSpaceId(spaces[0].id)
       if (spaces[0]?.description) setSpaceDetail(spaces[0].description)
     }).catch(() => setStatus('无法加载会话'))
   }, [])
@@ -92,7 +94,7 @@ function App() {
     <Layout.Sider className="sidebar" width={260}>
       <div className="brand">Data Agent</div>
       <div className="space">{spaceName}</div>
-      <div className="side-detail">Sales Space</div>
+      <div className="side-detail">{spaceId}</div>
       <Button block disabled={busy} onClick={newConversation}>新建对话</Button>
       <div className="history-title">最近对话</div>
       {history.map(item => <button className={item.id === conversationId ? 'history-item active' : 'history-item'} key={item.id} disabled={busy} onClick={() => openConversation(item.id)}>{item.title}</button>)}
@@ -110,7 +112,7 @@ function App() {
           </Card>
           {message.result && <ResultView data={message.result} />}
         </div>)}
-        {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>例如：查询今年各城市的销售额</p></Card>}
+        {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>{spaceId === 'orders' ? '例如：查询各订单状态的订单金额' : '例如：查询今年各城市的销售额'}</p></Card>}
         {status && <p className="status">{status}</p>}
         {answer && <Card title="分析">{answer}</Card>}
         {result && <ResultView data={result} />}

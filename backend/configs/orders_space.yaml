@@ -15,14 +15,14 @@ space:
       grain: [order_date, status]
       allowed_filters: [order_date, status]
       description: 订单应付金额
-      synonyms: [销售额, 金额]
-    order_count:
-      name: 订单量
+      synonyms: [金额]
+    order_rows:
+      name: 订单笔数
       model: orders
       expression: COUNT(*)
       grain: [order_date, status]
       allowed_filters: [order_date, status]
-      description: 订单一行计为一笔
+      description: 每一行订单一笔，包含全部状态
     credit_card_amount:
       name: 信用卡金额
       model: orders
@@ -48,12 +48,10 @@ space:
       name: 订单日期
       model: orders
       column: order_date
-      synonyms: [业务日期, 日期]
+      synonyms: [日期]
     status:
       name: 订单状态
       model: orders
       column: status
       synonyms: [状态]
-  instructions: 每一行订单计为一笔。订单金额使用 amount。只使用目录中的指标和维度。
-  sql_examples:
-    - SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status
+  instructions: 每一行订单计为一笔，包含全部状态。订单金额使用 amount。只使用目录中的指标和维度。

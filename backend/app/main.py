@@ -132,7 +132,7 @@ async def chat(request: ChatRequest):
         is_previous_period = bool(re.search(r"去年同期", request.message))
 
         if is_previous_period and not context:
-            message = "请先提供需要对比的销售查询，再询问去年同期。"
+            message = f"请先提供需要对比的{CATALOG['name']}查询，再询问去年同期。"
             yield event("conversation", {"conversation_id": conversation_id})
             yield event("text", {"delta": message})
             message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
@@ -175,7 +175,7 @@ async def chat(request: ChatRequest):
             return json.dumps(data, ensure_ascii=False)
 
         agent = Agent(
-            name="销售分析助手",
+            name=f"{CATALOG['name']}助手",
             model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
             instructions=space_instructions(CATALOG),
             tools=[get_semantic_catalog, resolve_business_terms, execute_semantic_query],
