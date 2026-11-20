@@ -54,6 +54,8 @@ class BusinessAttribute(BaseModel):
     name: str
     data_type: str
     restricted: bool = False
+    # 待确认口径还不能当作已发布、可直接问数的指标。
+    pending_confirmation: bool = False
 
 
 class BusinessObject(BaseModel):
@@ -72,6 +74,13 @@ class BusinessRelationship(BaseModel):
     cardinality: Literal["one_to_one", "one_to_many", "many_to_many"]
     verification_status: VerificationStatus
     description: str = ""
+
+
+class DatasetLineage(BaseModel):
+    id: str
+    source_dataset_id: str
+    target_dataset_id: str
+    verification_status: VerificationStatus
 
 
 class DatasetRelationship(BaseModel):
@@ -190,6 +199,7 @@ class SemanticModel(BaseModel):
     business_objects: list[BusinessObject]
     business_relationships: list[BusinessRelationship]
     datasets: list[Dataset]
+    dataset_lineage: list[DatasetLineage] = Field(default_factory=list)
     dataset_relationships: list[DatasetRelationship]
     metrics: list[Metric]
     dimensions: list[Dimension]

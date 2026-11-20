@@ -13,6 +13,22 @@ MODEL_PATH = ROOT / "backend" / "configs" / "semantic" / "jaffle_shop.yaml"
 SPACES_PATH = ROOT / "backend" / "configs" / "semantic" / "spaces.yaml"
 
 
+def test_pending_customer_measures_stay_out_of_the_order_space_query_metrics():
+    context = build_semantic_context(
+        "sales", "orders", model=load_semantic_model(MODEL_PATH), spaces_path=SPACES_PATH
+    )
+
+    assert [metric.id for metric in context.business.metrics] == [
+        "orders.order_amount",
+        "orders.order_count",
+        "orders.credit_card_amount",
+        "orders.coupon_amount",
+        "orders.bank_transfer_amount",
+        "orders.gift_card_amount",
+    ]
+    assert {metric.name for metric in context.business.metrics}.isdisjoint({"客户订单数", "客户生命周期价值"})
+
+
 def test_orders_context_selects_authorized_terms_and_serializes_without_sensitive_data():
     context = build_semantic_context(
         "sales",

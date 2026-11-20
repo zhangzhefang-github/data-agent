@@ -55,6 +55,11 @@ class StagingLineage(BaseModel):
     view_sql: str
 
 
+class PaymentMethodAmount(BaseModel):
+    order_amount: float
+    payment_amount: float
+
+
 class OrderBaseline(BaseModel):
     total_orders: int
     total_amount: float
@@ -63,6 +68,7 @@ class OrderBaseline(BaseModel):
     repeated_order_amount: float
     preaggregated_join_rows: int
     preaggregated_order_amount: float
+    amounts_by_payment_method: dict[str, PaymentMethodAmount]
 
 
 class CustomerBaseline(BaseModel):
@@ -110,6 +116,14 @@ _STAGING_LINEAGE = {
     "stg_customers": ("raw_customers", {"id": "customer_id"}, []),
     "stg_orders": ("raw_orders", {"id": "order_id", "user_id": "customer_id"}, []),
     "stg_payments": ("raw_payments", {"id": "payment_id"}, ["amount / 100"]),
+}
+
+# 订单上的四类金额列与 stg_payments.payment_method 的对应关系。
+_ORDER_AMOUNT_BY_PAYMENT_METHOD = {
+    "credit_card": "credit_card_amount",
+    "coupon": "coupon_amount",
+    "bank_transfer": "bank_transfer_amount",
+    "gift_card": "gift_card_amount",
 }
 
 
@@ -310,6 +324,27 @@ def _order_baseline(connection: duckdb.DuckDBPyConnection) -> OrderBaseline:
         LEFT JOIN paid_per_order USING (order_id)
         """
     ).fetchone()
+    # 按支付方式分别汇总，保留订单列与支付金额两侧，供核对而不是在这里判等。
+    order_amount_columns = ", ".join(
+        f'sum("{column}")' for column in _ORDER_AMOUNT_BY_PAYMENT_METHOD.values()
+    )
+    order_amounts = connection.execute(f"SELECT {order_amount_columns} FROM orders").fetchone()
+    payment_amounts = dict(
+        connection.execute(
+            """
+            SELECT payment_method, sum(amount)
+            FROM stg_payments
+            GROUP BY payment_method
+            """
+        ).fetchall()
+    )
+    amounts_by_payment_method = {
+        method: PaymentMethodAmount(
+            order_amount=order_amounts[index],
+            payment_amount=payment_amounts[method],
+        )
+        for index, method in enumerate(_ORDER_AMOUNT_BY_PAYMENT_METHOD)
+    }
     return OrderBaseline(
         total_orders=total_orders,
         total_amount=total_amount,
@@ -318,6 +353,7 @@ def _order_baseline(connection: duckdb.DuckDBPyConnection) -> OrderBaseline:
         repeated_order_amount=repeated_order_amount,
         preaggregated_join_rows=preaggregated_join_rows,
         preaggregated_order_amount=preaggregated_order_amount,
+        amounts_by_payment_method=amounts_by_payment_method,
     )
 
 

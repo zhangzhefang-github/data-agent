@@ -20,8 +20,8 @@ business_objects:
       - {id: last_name, name: 姓, data_type: string, restricted: true}
       - {id: first_order, name: 首次订单日期, data_type: date}
       - {id: most_recent_order, name: 最近订单日期, data_type: date}
-      - {id: number_of_orders, name: 客户订单数, data_type: integer}
-      - {id: customer_lifetime_value, name: 客户生命周期价值, data_type: decimal}
+      - {id: number_of_orders, name: 客户订单数, data_type: integer, pending_confirmation: true}
+      - {id: customer_lifetime_value, name: 客户生命周期价值, data_type: decimal, pending_confirmation: true}
   - id: order
     name: Order
     domain_id: sales
@@ -160,6 +160,12 @@ datasets:
     primary_key: [id]
     fields: [{id: id, name: 原始标识, data_type: integer}, {id: order_id, name: 订单标识, data_type: integer}, {id: payment_method, name: 支付方式, data_type: string}, {id: amount, name: 原始支付金额, data_type: integer}]
     physical_mapping: {data_source_id: jaffle_duckdb, object_name: raw_payments, object_type: table, column_mappings: {id: id, order_id: order_id, payment_method: payment_method, amount: amount}}
+dataset_lineage:
+  - {id: customer_source_to_staging, source_dataset_id: customer_source, target_dataset_id: customer_staging, verification_status: confirmed}
+  - {id: order_source_to_staging, source_dataset_id: order_source, target_dataset_id: order_staging, verification_status: confirmed}
+  - {id: payment_source_to_staging, source_dataset_id: payment_source, target_dataset_id: payment_staging, verification_status: confirmed}
+  - {id: customer_staging_to_mart, source_dataset_id: customer_staging, target_dataset_id: customer_mart, verification_status: proposed}
+  - {id: order_staging_to_mart, source_dataset_id: order_staging, target_dataset_id: order_mart, verification_status: proposed}
 dataset_relationships:
   - {id: order_mart_customer_mart, source_dataset_id: order_mart, target_dataset_id: customer_mart, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: order_staging_customer_staging, source_dataset_id: order_staging, target_dataset_id: customer_staging, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}

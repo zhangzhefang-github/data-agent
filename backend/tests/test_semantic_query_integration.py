@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.query import DataSource, Filter, OrderBy, Query, execute_query, load_catalog, question_catalog
+from app.semantic.loader import load_semantic_model
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +25,23 @@ def test_orders_query_adapter_still_uses_the_current_order_mart_source():
 
     assert {metric["model"] for metric in catalog["metrics"].values()} == {"order_mart"}
     assert {dimension["model"] for dimension in catalog["dimensions"].values()} == {"order_mart"}
+
+
+def test_order_question_totals_stay_unchanged_with_unconfirmed_mart_lineage(jaffle_shop_path: Path):
+    catalog = load_catalog(ROOT, "orders")
+    result = execute_query(
+        jaffle_shop_path,
+        Query(
+            metrics=["orders.order_count", "orders.order_amount"],
+            time_range={"start": "2018-01-01", "end": "2018-04-09"},
+        ),
+        date(2026, 11, 20),
+        catalog,
+        source=DataSource(engine="duckdb", location=str(jaffle_shop_path)),
+    )
+
+    assert result["columns"] == ["order_rows", "order_amount"]
+    assert result["rows"] == [[99, 1672.0]]
 
 
 def test_orders_catalog_is_projected_from_the_published_semantic_model():
@@ -94,6 +112,29 @@ def test_orders_canonical_count_and_legacy_alias_share_legacy_result_contract(ja
     assert canonical["columns"] == ["status", "order_rows", "order_amount"]
     assert canonical["rows"][0] == ["completed", 67, 1103.0]
     assert 'AS "order_rows"' in canonical["sql"]
+
+
+def test_status_aggregation_exposes_its_own_query_output_grain(jaffle_shop_path: Path):
+    catalog = load_catalog(ROOT, "orders")
+    model = load_semantic_model(ROOT / "backend" / "configs" / "semantic" / "jaffle_shop.yaml")
+    result = execute_query(
+        jaffle_shop_path,
+        Query(
+            metrics=["orders.order_count", "order_amount"],
+            dimensions=["status"],
+            time_range={"start": "2018-01-01", "end": "2018-04-09"},
+        ),
+        date(2026, 11, 20),
+        catalog,
+        source=DataSource(engine="duckdb", location=str(jaffle_shop_path)),
+    )
+
+    assert result["output_grain"] == ["orders.status"]
+    assert result["output_grain"] != model.dataset("order_mart").grain
+    assert result["output_grain"] != model.metric("orders.order_count").base_grain
+    assert model.dataset("order_mart").grain == ["order_id"]
+    assert model.metric("orders.order_count").base_grain == ["order_id"]
+    assert ["completed", 67, 1103.0] in result["rows"]
 
 
 def test_orders_semantic_catalog_preserves_current_year_empty_result(jaffle_shop_path: Path):
