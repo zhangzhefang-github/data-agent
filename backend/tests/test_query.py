@@ -111,3 +111,47 @@ def test_filters_time_boundaries_and_rejects_unknown_fields(tmp_path: Path):
     ]:
         with pytest.raises(ValueError):
             execute_query(path, query, date(2026, 6, 1))
+
+
+def test_postgres_requires_valid_scheme_and_schema(tmp_path: Path):
+    query = Query(metrics=['sales_amount'])
+    with pytest.raises(ValueError, match='schema'):
+        execute_query(tmp_path / 'sales.db', query, date(2026, 6, 1), database_url='postgresql://localhost/db')
+
+    config = {
+        'models': {'sales_summary': {'schema': 'sales', 'table': 'sales_summary', 'columns': ['stat_date', 'sales_amount'], 'date_column': 'stat_date'}},
+        'metrics': {'sales_amount': {'model': 'sales_summary', 'expression': 'SUM(sales_amount)'}},
+        'dimensions': {},
+    }
+    with pytest.raises(ValueError, match='PostgreSQL'):
+        execute_query(tmp_path / 'sales.db', query, date(2026, 6, 1), config, database_url='mysql://localhost/db')
+
+
+def test_postgres_query_is_schema_qualified_bound_and_read_only(monkeypatch, tmp_path: Path):
+    import psycopg
+
+    commands = []
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def execute(self, sql, params=None): commands.append((sql, params))
+        def fetchall(self): return [(100,)]
+
+    class Connection:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def cursor(self): return Cursor()
+
+    monkeypatch.setattr(psycopg, 'connect', lambda url, connect_timeout: Connection())
+    config = {
+        'models': {'sales_summary': {'schema': 'sales', 'table': 'sales_summary', 'columns': ['stat_date', 'sales_amount'], 'date_column': 'stat_date'}},
+        'metrics': {'sales_amount': {'model': 'sales_summary', 'expression': 'SUM(sales_amount)'}},
+        'dimensions': {},
+    }
+    result = execute_query(tmp_path / 'sales.db', Query(metrics=['sales_amount']), date(2026, 6, 1), config, database_url='postgresql://localhost/db')
+    assert result['rows'] == [[100]]
+    assert commands[0][0] == 'SET TRANSACTION READ ONLY'
+    assert 'statement_timeout' in commands[1][0]
+    assert 'FROM "sales"."sales_summary"' in commands[2][0]
+    assert commands[2][1] == ['2026-01-01', '2026-06-01', 500]

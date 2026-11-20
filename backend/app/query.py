@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 import re
 import sqlite3
@@ -42,7 +43,7 @@ class Query(BaseModel):
     limit: int = Field(default=500, ge=1, le=500)
 
 
-def execute_query(path: Path, query: Query, today: date, catalog: dict | None = None) -> dict:
+def execute_query(path: Path, query: Query, today: date, catalog: dict | None = None, database_url: str | None = None) -> dict:
     if catalog is None:
         config = Path(__file__).resolve().parents[1] / 'configs' / 'sales_space.yaml'
         catalog = yaml.safe_load(config.read_text())['space']
@@ -57,9 +58,12 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
             raise ValueError('指标和维度不属于同一数据模型')
         model = catalog['models'][first_model]
         table = model['table']
+        schema = model.get('schema')
         date_column = model['date_column']
         allowed_columns = set(model['columns'])
         identifiers = [table, date_column, *allowed_columns, *query.metrics, *query.dimensions]
+        if schema is not None:
+            identifiers.append(schema)
         if not all(isinstance(item, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', item) for item in identifiers):
             raise ValueError('物理映射包含无效标识符')
         if date_column not in allowed_columns:
@@ -104,7 +108,10 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
     for item in query.filters:
         conditions.append(f'{filter_sql[item.field]} {operators[item.operator]} ?')
         parameters.append(item.value)
-    sql = f'SELECT {", ".join(selections)} FROM "{table}" WHERE {" AND ".join(conditions)}'
+    if database_url and not schema:
+        raise ValueError('PostgreSQL 数据模型必须指定授权 schema')
+    table_reference = f'"{schema}"."{table}"' if schema else f'"{table}"'
+    sql = f'SELECT {", ".join(selections)} FROM {table_reference} WHERE {" AND ".join(conditions)}'
     if dimension_sql:
         sql += f' GROUP BY {", ".join(dimension_sql.values())}'
     else:
@@ -124,21 +131,34 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
     if len(statements) != 1 or not isinstance(statements[0], exp.Select):
         raise ValueError('只允许单条 SELECT 查询')
     tree = statements[0]
-    if any(item.name != table for item in tree.find_all(exp.Table)):
+    if any(item.name != table or (item.db or None) != schema for item in tree.find_all(exp.Table)):
         raise ValueError('查询包含未授权的数据表')
     if any(item.name not in allowed_columns for item in tree.find_all(exp.Column)):
         raise ValueError('查询包含未授权的字段')
 
     start = time.monotonic()
-    uri = f'file:{quote(str(path.resolve()))}?mode=ro'
-    with sqlite3.connect(uri, uri=True, timeout=5) as db:
-        deadline = time.monotonic() + 5
-        db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
-        rows = db.execute(sql, parameters).fetchall()
+    if database_url:
+        from urllib.parse import urlsplit
+        import psycopg
+
+        if urlsplit(database_url).scheme not in ('postgres', 'postgresql'):
+            raise ValueError('只支持 PostgreSQL 连接地址')
+        with psycopg.connect(database_url, connect_timeout=5) as db:
+            with db.cursor() as cursor:
+                cursor.execute('SET TRANSACTION READ ONLY')
+                cursor.execute("SET LOCAL statement_timeout = '5s'")
+                cursor.execute(sql.replace('?', '%s'), parameters)
+                rows = cursor.fetchall()
+    else:
+        uri = f'file:{quote(str(path.resolve()))}?mode=ro'
+        with sqlite3.connect(uri, uri=True, timeout=5) as db:
+            deadline = time.monotonic() + 5
+            db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+            rows = db.execute(sql, parameters).fetchall()
     return {
         'columns': [*query.dimensions, *query.metrics],
-        'rows': [list(row) for row in rows],
+        'rows': [[value.isoformat() if isinstance(value, date) else float(value) if isinstance(value, Decimal) else value for value in row] for row in rows],
         'sql': sql,
-        'source': 'SQLite 示例数据',
+        'source': 'PostgreSQL ADS' if database_url else 'SQLite 示例数据',
         'elapsed_ms': round((time.monotonic() - start) * 1000, 2),
     }

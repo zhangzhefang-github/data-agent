@@ -23,7 +23,9 @@ from app.query import Query, TimeRange, execute_query
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
-DATABASE = ROOT / "data" / "demo" / "sales.db"
+EXTERNAL_SQLITE_PATH = os.getenv("SALES_SQLITE_PATH")
+DATABASE = Path(EXTERNAL_SQLITE_PATH) if EXTERNAL_SQLITE_PATH else ROOT / "data" / "demo" / "sales.db"
+DATABASE_URL = os.getenv("SALES_DATABASE_URL") or None
 CONVERSATIONS = ROOT / "data" / "conversations.db"
 CATALOG = yaml.safe_load((ROOT / "backend" / "configs" / "sales_space.yaml").read_text())["space"]
 app = FastAPI()
@@ -38,7 +40,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 def setup():
-    initialize(DATABASE)
+    if not DATABASE_URL and not EXTERNAL_SQLITE_PATH:
+        initialize(DATABASE)
 
 
 @app.get("/api/health")
@@ -147,7 +150,12 @@ async def chat(request: ChatRequest):
                 plan = plan.model_copy(update={"time_range": TimeRange(start=last_year(previous_range.start), end=last_year(previous_range.end))})
             elif plan.time_range is None:
                 plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
-            data = execute_query(DATABASE, plan, today)
+            if DATABASE_URL:
+                data = execute_query(DATABASE, plan, today, database_url=DATABASE_URL)
+            else:
+                data = execute_query(DATABASE, plan, today)
+            if EXTERNAL_SQLITE_PATH and not DATABASE_URL:
+                data['source'] = 'SQLite ADS'
             result_data.append(data)
             query_data.append(plan.model_dump(mode="json"))
             return json.dumps(data, ensure_ascii=False)
@@ -169,9 +177,10 @@ async def chat(request: ChatRequest):
         yield event("conversation", {"conversation_id": conversation_id})
         yield event("status", {"status": "running"})
         try:
-            prompt = request.message
+            business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+            prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{request.message}"
             if context:
-                prompt = f"最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"
+                prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"
             run = Runner.run_streamed(agent, prompt, run_config=RunConfig(trace_include_sensitive_data=False))
             async for item in run.stream_events():
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
