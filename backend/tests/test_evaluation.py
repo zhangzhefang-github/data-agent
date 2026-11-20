@@ -34,3 +34,24 @@ def test_live_without_api_key_is_explicitly_skipped(monkeypatch):
     cases = run_live()['cases']
     assert len(cases) >= 10
     assert all(case['status'] == 'skipped' for case in cases)
+
+
+def test_live_evaluation_uses_fixture_with_external_ads_configured(monkeypatch):
+    from app import main
+    from app.evaluation import runner
+
+    case = runner.load_dataset()['cases'][0]
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
+    monkeypatch.setattr(main, 'DATABASE_URL', 'postgresql://example.invalid/enterprise')
+    monkeypatch.setattr(main, 'EXTERNAL_SQLITE_PATH', '/enterprise/sales.db')
+
+    def fake_send(client, question, conversation_id=None):
+        assert main.DATABASE_URL is None
+        assert main.EXTERNAL_SQLITE_PATH is None
+        assert main.DATABASE.name == 'sales.db'
+        return {'error': True}
+
+    monkeypatch.setattr(runner, 'send', fake_send)
+    report = runner.run_live(case['id'])
+    assert report['cases'][0]['status'] == 'failed'
+    assert main.DATABASE_URL == 'postgresql://example.invalid/enterprise'

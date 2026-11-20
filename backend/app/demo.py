@@ -1,3 +1,4 @@
+from contextlib import closing
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ def initialize(path: Path) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     year = datetime.now(ZoneInfo("Asia/Shanghai")).year
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute("""
             CREATE TABLE sales_summary (
                 stat_date TEXT NOT NULL, city TEXT NOT NULL,

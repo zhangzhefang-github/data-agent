@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -11,7 +12,7 @@ from zoneinfo import ZoneInfo
 os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
 
 import yaml
-from agents import Agent, RunConfig, Runner, function_tool
+from agents import Agent, RunConfig, Runner, function_tool, set_tracing_export_api_key
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -21,6 +22,9 @@ from app.demo import initialize
 from app import conversations
 from app.query import Query, TimeRange, execute_query
 
+if os.getenv("OPENAI_TRACING_API_KEY"):
+    set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
+
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 EXTERNAL_SQLITE_PATH = os.getenv("SALES_SQLITE_PATH")
@@ -29,7 +33,6 @@ DATABASE_URL = os.getenv("SALES_DATABASE_URL") or None
 CONVERSATIONS = ROOT / "data" / "conversations.db"
 CATALOG = yaml.safe_load((ROOT / "backend" / "configs" / "sales_space.yaml").read_text())["space"]
 app = FastAPI()
-active_conversations: set[str] = set()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -105,13 +108,20 @@ async def chat(request: ChatRequest):
     else:
         conversation_id = conversations.create(CONVERSATIONS, request.message)
         conversation = conversations.get(CONVERSATIONS, conversation_id)
-    if conversation_id in active_conversations:
+    lock_dir = CONVERSATIONS.parent / ".conversation-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock = (lock_dir / conversation_id).open("a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
         raise HTTPException(status_code=409, detail="该会话正在查询，请稍后再试")
-    active_conversations.add(conversation_id)
+    # Refresh after acquiring the interprocess lock so the context cannot be stale.
+    conversation = conversations.get(CONVERSATIONS, conversation_id)
     try:
         conversations.add_message(CONVERSATIONS, conversation_id, "user", request.message)
     except Exception:
-        active_conversations.discard(conversation_id)
+        lock.close()
         raise
 
     async def stream():
@@ -119,7 +129,7 @@ async def chat(request: ChatRequest):
         query_data = []
         answer = []
         context = conversation["last_query"] if conversation else None
-        is_previous_period = bool(re.fullmatch(r"\s*去年同期(?:呢|是多少|怎么样)?[？?。！!\s]*", request.message))
+        is_previous_period = bool(re.search(r"去年同期", request.message))
 
         if is_previous_period and not context:
             message = "请先提供需要对比的销售查询，再询问去年同期。"
@@ -138,7 +148,13 @@ async def chat(request: ChatRequest):
         @function_tool
         def resolve_business_terms(question: str) -> str:
             """Find sales terms and dimensions relevant to a user question."""
-            return json.dumps({"sales_amount": "销售额", "order_count": "订单量", "average_order_value": "客单价", "city": "城市", "store": "门店", "product": "产品", "stat_date": "业务日期"}, ensure_ascii=False)
+            matches = {}
+            for category in ("metrics", "dimensions"):
+                for identifier, item in CATALOG[category].items():
+                    terms = [identifier, item["name"], *item.get("synonyms", [])]
+                    if any(term.lower() in question.lower() for term in terms):
+                        matches[identifier] = item["name"]
+            return json.dumps(matches, ensure_ascii=False)
 
         @function_tool
         def execute_semantic_query(plan: Query) -> str:
@@ -181,7 +197,7 @@ async def chat(request: ChatRequest):
             prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{request.message}"
             if context:
                 prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"
-            run = Runner.run_streamed(agent, prompt, run_config=RunConfig(trace_include_sensitive_data=False))
+            run = Runner.run_streamed(agent, prompt, run_config=RunConfig(trace_include_sensitive_data=False, tracing_disabled=not bool(os.getenv("OPENAI_TRACING_API_KEY"))))
             async for item in run.stream_events():
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
                     answer.append(item.data.delta)
@@ -206,6 +222,6 @@ async def chat(request: ChatRequest):
             async for item in stream():
                 yield item
         finally:
-            active_conversations.discard(conversation_id)
+            lock.close()
 
     return StreamingResponse(guarded_stream(), media_type="text/event-stream")

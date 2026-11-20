@@ -12,18 +12,24 @@ space:
       name: 销售额
       model: sales_summary
       expression: SUM(sales_amount)
+      grain: [stat_date, store, product]
+      allowed_filters: [stat_date, city, store, product]
       description: 人民币净销售额
       synonyms: [销售金额, 净销售额]
     order_count:
       name: 订单量
       model: sales_summary
       expression: SUM(order_count)
+      grain: [stat_date, store, product]
+      allowed_filters: [stat_date, city, store, product]
       description: 有效订单数
     average_order_value:
       name: 客单价
       model: sales_summary
       numerator: sales_amount
       denominator: order_count
+      grain: [stat_date, store, product]
+      allowed_filters: [stat_date, city, store, product]
       description: 汇总销售额除以汇总订单量
   dimensions:
     stat_date:

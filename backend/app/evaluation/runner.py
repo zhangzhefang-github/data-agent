@@ -1,4 +1,5 @@
 """Run reproducible semantic-query and optional live-agent evaluations."""
+from contextlib import closing
 import argparse
 import json
 import os
@@ -29,7 +30,7 @@ def load_dataset():
 
 
 def create_fixture(path):
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute('CREATE TABLE sales_summary (stat_date TEXT, city TEXT, store_id TEXT, product TEXT, sales_amount INTEGER, order_count INTEGER)')
         db.executemany('INSERT INTO sales_summary VALUES (?, ?, ?, ?, ?, ?)', FIXTURE)
 
@@ -147,7 +148,7 @@ def run_live(case_id=None):
         create_fixture(database)
         conversations = Path(directory) / 'conversations.db'
         reports = []
-        with patch.object(main, 'DATABASE', database), patch.object(main, 'CONVERSATIONS', conversations), patch.object(main, 'datetime', FixedDatetime):
+        with patch.object(main, 'DATABASE', database), patch.object(main, 'DATABASE_URL', None), patch.object(main, 'EXTERNAL_SQLITE_PATH', None), patch.object(main, 'CONVERSATIONS', conversations), patch.object(main, 'datetime', FixedDatetime):
             with TestClient(main.app) as client:
                 for case in dataset['cases']:
                     if 'previous_question' in case:
