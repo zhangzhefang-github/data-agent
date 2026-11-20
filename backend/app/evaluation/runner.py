@@ -49,6 +49,8 @@ def compare_plan(actual, expected, clock):
     default_range = {'start': clock.replace(month=1, day=1).isoformat(), 'end': clock.isoformat()}
     actual_data = actual_plan.model_dump(mode='json')
     expected_data = expected_plan.model_dump(mode='json')
+    if expected_data['order_by'] is None:
+        actual_data['order_by'] = None
     for item in (actual_data, expected_data):
         if item['time_range'] == default_range:
             item['time_range'] = None
@@ -75,11 +77,19 @@ def evaluate_case(case, database, clock, plan=None):
         report.update(failure_stage='database_execution', execution_status='failed', error=type(exc).__name__)
         return report
     report.update(sql=result['sql'], actual_rows=result['rows'], execution_status='passed')
-    if result['rows'] != case['expected_rows']:
+    if not rows_match(case, result['rows']):
         report['failure_stage'] = 'database_execution'
         return report
     report['status'] = 'passed'
     return report
+
+
+def rows_match(case, rows):
+    expected = case['expected_rows']
+    if case['expected_plan'].get('order_by') is None:
+        key = lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True)
+        return sorted(rows, key=key) == sorted(expected, key=key)
+    return rows == expected
 
 
 def run_deterministic():
@@ -162,7 +172,7 @@ def run_live(case_id=None):
                     # Compare the exact result returned by the live tool, not just its replay.
                     report['actual_rows'] = response['result']['rows']
                     report['sql'] = response['result']['sql']
-                    if report['status'] == 'passed' and report['actual_rows'] != case['expected_rows']:
+                    if report['status'] == 'passed' and not rows_match(case, report['actual_rows']):
                         report.update(status='failed', failure_stage='database_execution')
                     reports.append(report)
     return {'mode': 'live', 'clock': dataset['clock'], 'cases': reports}
