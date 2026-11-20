@@ -142,6 +142,31 @@ def test_validator_reports_invalid_references_cycles_and_catalog_mappings():
         assert diagnostic.suggestion
 
 
+def test_published_order_metric_referencing_unknown_dimension_cannot_be_published():
+    # 已发布订单模型里，指标引用不存在的维度时不能发布。
+    model = load_semantic_model(MODEL_PATH)
+    metric = model.metric("orders.order_count")
+    assert metric.published
+    metric.compatible_dimension_ids = ["orders.missing_dimension"]
+
+    result = validate_semantic_model(model)
+
+    assert "unknown_dimension" in {diagnostic.code for diagnostic in result.errors}
+    assert not result.valid
+
+
+def test_dataset_relationship_join_key_outside_dataset_fields_cannot_be_published():
+    # 数据集关系的 JOIN 键不属于该数据集字段时不能发布。
+    model = load_semantic_model(MODEL_PATH)
+    relationship = next(item for item in model.dataset_relationships if item.id == "order_mart_customer_mart")
+    relationship.source_fields = ["not_an_order_mart_field"]
+
+    result = validate_semantic_model(model)
+
+    assert "invalid_join_key" in {diagnostic.code for diagnostic in result.errors}
+    assert not result.valid
+
+
 def test_registry_rejects_a_model_with_hard_errors():
     model = load_semantic_model(MODEL_PATH)
     model.datasets[0].primary_key = ["not_a_field"]
