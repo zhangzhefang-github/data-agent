@@ -95,7 +95,7 @@ async def chat(request: ChatRequest):
         @function_tool
         def resolve_business_terms(question: str) -> str:
             """Find sales terms and dimensions relevant to a user question."""
-            return json.dumps({"sales_amount": "销售额", "city": "城市"}, ensure_ascii=False)
+            return json.dumps({"sales_amount": "销售额", "order_count": "订单量", "average_order_value": "客单价", "city": "城市", "store": "门店", "product": "产品", "stat_date": "业务日期"}, ensure_ascii=False)
 
         @function_tool
         def execute_semantic_query(plan: Query) -> str:
@@ -112,7 +112,8 @@ async def chat(request: ChatRequest):
             instructions=(
                 "你是销售分析助手。只能回答销售分析问题。"
                 "先读取目录，再通过结构化工具查询，禁止回答未经查询的数值。"
-                "当前只支持按城市汇总销售额，今年截至今天。"
+                "支持销售额、订单量和客单价，按城市、门店、产品及业务日期分组或过滤。"
+                "无指定时间时查询今年截至今天。门店排名按销售额降序排列并设置数量上限。"
                 "遇到写入、未授权表、未知指标或其他不支持的请求请拒绝并说明。"
                 "按查询结果用中文简短回答，若无行则说明无数据，销售额为零时明确显示为0元，不能说成缺失或无数据。"
             ),

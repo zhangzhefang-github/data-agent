@@ -74,3 +74,40 @@ def test_unlisted_metric_column_rejected(tmp_path: Path):
     }
     with pytest.raises(ValueError):
         execute_query(tmp_path / "sales.db", Query(metrics=["sales_amount"], dimensions=["city"]), date(2026, 6, 1), catalog)
+
+
+def test_store_ranking_and_weighted_order_value(tmp_path: Path):
+    path = tmp_path / 'sales.db'
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE sales_summary (stat_date TEXT, city TEXT, store_id TEXT, product TEXT, sales_amount INTEGER, order_count INTEGER)')
+        db.executemany('INSERT INTO sales_summary VALUES (?, ?, ?, ?, ?, ?)', [
+            ('2026-01-01', '北京', 'B', 'A', 100, 1),
+            ('2026-06-01', '北京', 'B', 'B', 100, 9),
+            ('2026-03-01', '北京', 'A', 'A', 200, 2),
+            ('2026-03-01', '北京', 'C', 'A', 0, 0),
+            ('2026-06-02', '北京', 'A', 'A', 500, 1),
+        ])
+    result = execute_query(path, Query(metrics=['sales_amount', 'order_count', 'average_order_value'], dimensions=['store'], filters=[{'field':'city','operator':'eq','value':'北京'}], order_by={'field':'sales_amount','direction':'desc'}, limit=3), date(2026, 6, 1))
+    assert result['rows'] == [['A', 200, 2, 100.0], ['B', 200, 10, 20.0], ['C', 0, 0, None]]
+
+
+def test_filters_time_boundaries_and_rejects_unknown_fields(tmp_path: Path):
+    path = tmp_path / 'sales.db'
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE sales_summary (stat_date TEXT, city TEXT, store_id TEXT, product TEXT, sales_amount INTEGER, order_count INTEGER)')
+        db.executemany('INSERT INTO sales_summary VALUES (?, ?, ?, ?, ?, ?)', [
+            ('2025-12-31', '北京', 'A', 'A', 1000, 1),
+            ('2026-01-01', '北京', 'A', 'A', 10, 1),
+            ('2026-06-01', '北京', 'A', 'A', 30, 1),
+            ('2026-06-01', '北京', 'A', 'B', 50, 1),
+            ('2026-06-02', '北京', 'A', 'A', 1000, 1),
+        ])
+    result = execute_query(path, Query(metrics=['order_count'], dimensions=['city'], filters=[{'field':'product','operator':'eq','value':'A'}], time_range={'start':'2026-01-01','end':'2026-06-01'}), date(2026, 6, 1))
+    assert result['rows'] == [['北京', 2]]
+    for query in [
+        Query(metrics=['sales_amount'], dimensions=['private']),
+        Query(metrics=['sales_amount'], filters=[{'field':'password','operator':'eq','value':'x'}]),
+        Query(metrics=['sales_amount'], order_by={'field':'password','direction':'asc'}),
+    ]:
+        with pytest.raises(ValueError):
+            execute_query(path, query, date(2026, 6, 1))
