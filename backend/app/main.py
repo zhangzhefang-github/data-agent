@@ -10,17 +10,19 @@ os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
 
 import yaml
 from agents import Agent, RunConfig, Runner, function_tool
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.demo import initialize
+from app import conversations
 from app.query import Query, execute_query
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 DATABASE = ROOT / "data" / "demo" / "sales.db"
+CONVERSATIONS = ROOT / "data" / "conversations.db"
 CATALOG = yaml.safe_load((ROOT / "backend" / "configs" / "sales_space.yaml").read_text())["space"]
 app = FastAPI()
 app.add_middleware(
@@ -48,6 +50,20 @@ def spaces():
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    conversation_id: str | None = None
+
+
+@app.get("/api/conversations")
+def conversation_list():
+    return conversations.list_conversations(CONVERSATIONS)
+
+
+@app.get("/api/conversations/{conversation_id}")
+def conversation_detail(conversation_id: str):
+    conversation = conversations.get(CONVERSATIONS, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return conversation
 
 
 def event(kind: str, payload: dict) -> str:
@@ -56,8 +72,20 @@ def event(kind: str, payload: dict) -> str:
 
 @app.post("/api/chat/stream")
 async def chat(request: ChatRequest):
+    if request.conversation_id:
+        conversation_id = request.conversation_id
+        conversation = conversations.get(CONVERSATIONS, conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+    else:
+        conversation_id = conversations.create(CONVERSATIONS, request.message)
+        conversation = conversations.get(CONVERSATIONS, conversation_id)
+    conversations.add_message(CONVERSATIONS, conversation_id, "user", request.message)
+
     async def stream():
         result_data = []
+        query_data = []
+        answer = []
 
         @function_tool
         def get_semantic_catalog() -> str:
@@ -75,6 +103,7 @@ async def chat(request: ChatRequest):
             today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
             data = execute_query(DATABASE, plan, today)
             result_data.append(data)
+            query_data.append(plan.model_dump(mode="json"))
             return json.dumps(data, ensure_ascii=False)
 
         agent = Agent(
@@ -89,14 +118,25 @@ async def chat(request: ChatRequest):
             ),
             tools=[get_semantic_catalog, resolve_business_terms, execute_semantic_query],
         )
+        yield event("conversation", {"conversation_id": conversation_id})
         yield event("status", {"status": "running"})
         try:
-            run = Runner.run_streamed(agent, request.message, run_config=RunConfig(trace_include_sensitive_data=False))
+            context = conversation["last_query"] if conversation else None
+            prompt = request.message
+            if context:
+                prompt = f"最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"
+            run = Runner.run_streamed(agent, prompt, run_config=RunConfig(trace_include_sensitive_data=False))
             async for item in run.stream_events():
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
+                    answer.append(item.data.delta)
                     yield event("text", {"delta": item.data.delta})
             if result_data:
                 yield event("result", result_data[-1])
+            message_id = conversations.add_message(
+                CONVERSATIONS, conversation_id, "assistant", "".join(answer),
+                result_data[-1] if result_data else None, query_data[-1] if query_data else None,
+            )
+            yield event("message", {"id": message_id})
             yield event("done", {"status": "completed"})
         except asyncio.CancelledError:
             raise

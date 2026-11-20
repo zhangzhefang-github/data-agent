@@ -14,3 +14,6 @@ main { max-width: 920px; margin: 40px auto; padding: 0 24px; display: grid; gap:
 pre { white-space: pre-wrap; background: #f5f7fa; padding: 14px; }
 summary { cursor: pointer; margin-top: 24px; }
 @media (max-width: 700px) { .sidebar { display: none; } .content header { padding: 20px; } main { margin: 24px auto; } }
+.history-title { color: #9aafbd; margin: 28px 0 10px; font-size: 12px; }
+.history-item { display: block; width: 100%; color: #d8e2e8; text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.history-item:hover { background: #294356; }
