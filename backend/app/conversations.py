@@ -21,6 +21,11 @@ def connect(path: Path) -> sqlite3.Connection:
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             FOREIGN KEY (conversation_id) REFERENCES conversations(id)
         );
+        CREATE TABLE IF NOT EXISTS feedback (
+            message_id TEXT PRIMARY KEY,
+            rating TEXT NOT NULL CHECK (rating IN ('correct', 'incorrect')),
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        );
     ''')
     return db
 
@@ -43,7 +48,10 @@ def get(path: Path, conversation_id: str) -> dict | None:
         row = db.execute('SELECT * FROM conversations WHERE id = ?', (conversation_id,)).fetchone()
         if row is None:
             return None
-        messages = db.execute('SELECT id, role, content, result, created_at FROM messages WHERE conversation_id = ? ORDER BY rowid', (conversation_id,)).fetchall()
+        messages = db.execute('''SELECT messages.id, messages.role, messages.content, messages.result,
+            messages.created_at, feedback.rating AS feedback FROM messages
+            LEFT JOIN feedback ON feedback.message_id = messages.id
+            WHERE messages.conversation_id = ? ORDER BY messages.rowid''', (conversation_id,)).fetchall()
     return {
         'id': row['id'], 'title': row['title'], 'created_at': row['created_at'],
         'last_query': json.loads(row['last_query']) if row['last_query'] else None,
@@ -59,3 +67,13 @@ def add_message(path: Path, conversation_id: str, role: str, content: str, resul
         if query is not None:
             db.execute('UPDATE conversations SET last_query = ? WHERE id = ?', (json.dumps(query, ensure_ascii=False), conversation_id))
     return message_id
+
+
+def save_feedback(path: Path, message_id: str, rating: str) -> bool:
+    with connect(path) as db:
+        message = db.execute("SELECT id FROM messages WHERE id = ? AND role = 'assistant'", (message_id,)).fetchone()
+        if message is None:
+            return False
+        db.execute('''INSERT INTO feedback (message_id, rating) VALUES (?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET rating = excluded.rating''', (message_id, rating))
+    return True

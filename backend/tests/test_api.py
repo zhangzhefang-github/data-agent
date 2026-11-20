@@ -3,6 +3,24 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+def test_feedback_is_saved_for_assistant_messages(monkeypatch, tmp_path):
+    from app import main
+
+    monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
+    conversation_id = main.conversations.create(main.CONVERSATIONS, "销售")
+    message_id = main.conversations.add_message(main.CONVERSATIONS, conversation_id, "assistant", "结果")
+    user_id = main.conversations.add_message(main.CONVERSATIONS, conversation_id, "user", "问题")
+    with TestClient(app) as client:
+        assert client.post("/api/feedback", json={"message_id": message_id, "rating": "correct"}).status_code == 200
+        messages = client.get(f"/api/conversations/{conversation_id}").json()["messages"]
+        assert messages[0]["feedback"] == "correct"
+        assert client.post("/api/feedback", json={"message_id": message_id, "rating": "incorrect"}).status_code == 200
+        assert client.get(f"/api/conversations/{conversation_id}").json()["messages"][0]["feedback"] == "incorrect"
+        assert client.post("/api/feedback", json={"message_id": "missing", "rating": "correct"}).status_code == 404
+        assert client.post("/api/feedback", json={"message_id": user_id, "rating": "correct"}).status_code == 404
+        assert client.post("/api/feedback", json={"message_id": message_id, "rating": "maybe"}).status_code == 422
+
+
 def test_conversation_is_created_and_reopened(monkeypatch, tmp_path):
     from app import main
 

@@ -23,3 +23,4 @@ summary { cursor: pointer; margin-top: 24px; }
   .brand { margin-bottom: 12px; }
   .history-title { margin-top: 16px; }
 }
+.feedback { display: flex; align-items: center; gap: 8px; margin: 8px 0 14px; color: #637688; }

@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Button, Card, Input, Layout, Table, Typography } from 'antd'
+import { Button, Card, Input, Layout, Typography } from 'antd'
+import { Feedback, ResultView, type Rating, type Result } from './ResultView'
 import 'antd/dist/reset.css'
 import './style.css'
 
-type Result = { columns: string[], rows: (string | number | null)[][], sql: string, source: string, elapsed_ms: number }
-type Message = { id: string, role: string, content: string, result: Result | null }
+type Message = { id: string, role: string, content: string, result: Result | null, feedback?: Rating | null }
 type ConversationSummary = { id: string, title: string }
-const labels: Record<string, string> = { city: '城市', store: '门店', product: '产品', stat_date: '业务日期', sales_amount: '销售额（元）', order_count: '订单量', average_order_value: '客单价（元）' }
 function App() {
   const [conversationId, setConversationId] = useState<string>()
   const [history, setHistory] = useState<ConversationSummary[]>([])
@@ -27,9 +26,6 @@ function App() {
   }
   function newConversation() {
     setConversationId(undefined); setMessages([]); setAnswer(''); setResult(undefined); setStatus(''); setQuestion('')
-  }
-  function showResult(data: Result) {
-    return <Card title="查询结果"><p>{data.rows.length === 0 ? '该范围内无数据' : `${data.source} · ${data.elapsed_ms} ms`}</p><Table pagination={false} rowKey="key" dataSource={data.rows.map((row, index) => ({ key: index, ...Object.fromEntries(row.map((v, i) => [data.columns[i], v])) }))} columns={data.columns.map(name => ({ title: labels[name] ?? name, dataIndex: name, key: name }))}/><details><summary>查看 SQL</summary><pre>{data.sql}</pre></details></Card>
   }
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
@@ -74,6 +70,6 @@ function App() {
     } catch { setStatus('连接失败，请检查服务是否启动') }
     finally { setBusy(false) }
   }
-  return <Layout className="shell"><Layout.Sider className="sidebar" width={240}><div className="brand">Data Agent</div><div className="space">销售分析</div><div className="side-detail">Sales Space</div><Button block disabled={busy} onClick={newConversation}>新建对话</Button><div className="history-title">最近对话</div>{history.map(item => <button className="history-item" key={item.id} disabled={busy} onClick={() => openConversation(item.id)}>{item.title}</button>)}</Layout.Sider><Layout.Content className="content"><header><Typography.Title level={3}>销售分析工作台</Typography.Title><Typography.Text type="secondary">以自然语言探索销售数据</Typography.Text></header><main>{messages.map(message => <div key={message.id}><Card title={message.role === "user" ? "你" : "分析"}>{message.content}</Card>{message.result && showResult(message.result)}</div>)}<Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>例如：查询今年各城市的销售额</p></Card><div className="ask"><Input.TextArea value={question} onChange={e => setQuestion(e.target.value)} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); submit() } }} placeholder="输入销售问题" autoSize={{ minRows: 2, maxRows: 5 }}/><Button type="primary" loading={busy} onClick={submit}>发送</Button></div>{status && <p className="status">{status}</p>}{answer && <Card title="分析">{answer}</Card>}{result && <Card title="查询结果"><p>{result.rows.length === 0 ? '该范围内无数据' : `${result.source} · ${result.elapsed_ms} ms`}</p><Table pagination={false} rowKey={(_, i) => String(i)} dataSource={result.rows.map((row, index) => ({ key: index, ...Object.fromEntries(row.map((v, i) => [result.columns[i], v])) }))} columns={result.columns.map(name => ({ title: labels[name] ?? name, dataIndex: name, key: name }))}/><details><summary>查看 SQL</summary><pre>{result.sql}</pre></details></Card>}</main></Layout.Content></Layout>
+  return <Layout className="shell"><Layout.Sider className="sidebar" width={240}><div className="brand">Data Agent</div><div className="space">销售分析</div><div className="side-detail">Sales Space</div><Button block disabled={busy} onClick={newConversation}>新建对话</Button><div className="history-title">最近对话</div>{history.map(item => <button className="history-item" key={item.id} disabled={busy} onClick={() => openConversation(item.id)}>{item.title}</button>)}</Layout.Sider><Layout.Content className="content"><header><Typography.Title level={3}>销售分析工作台</Typography.Title><Typography.Text type="secondary">以自然语言探索销售数据</Typography.Text></header><main>{messages.map(message => <div key={message.id}><Card title={message.role === "user" ? "你" : "分析"}>{message.content}</Card>{message.role === 'assistant' && <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />}{message.result && <ResultView data={message.result} />}</div>)}<Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>例如：查询今年各城市的销售额</p></Card><div className="ask"><Input.TextArea value={question} onChange={e => setQuestion(e.target.value)} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); submit() } }} placeholder="输入销售问题" autoSize={{ minRows: 2, maxRows: 5 }}/><Button type="primary" loading={busy} onClick={submit}>发送</Button></div>{status && <p className="status">{status}</p>}{answer && <Card title="分析">{answer}</Card>}{result && <ResultView data={result} />}</main></Layout.Content></Layout>
 }
 createRoot(document.getElementById('root')!).render(<App />)
