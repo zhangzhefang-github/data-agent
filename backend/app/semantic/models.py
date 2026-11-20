@@ -54,6 +54,8 @@ class BusinessAttribute(BaseModel):
     name: str
     data_type: str
     restricted: bool = False
+    # 待确认口径还不能当作已发布、可直接问数的指标。
+    pending_confirmation: bool = False
 
 
 class BusinessObject(BaseModel):

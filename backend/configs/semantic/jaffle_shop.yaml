@@ -20,8 +20,8 @@ business_objects:
       - {id: last_name, name: 姓, data_type: string, restricted: true}
       - {id: first_order, name: 首次订单日期, data_type: date}
       - {id: most_recent_order, name: 最近订单日期, data_type: date}
-      - {id: number_of_orders, name: 客户订单数, data_type: integer}
-      - {id: customer_lifetime_value, name: 客户生命周期价值, data_type: decimal}
+      - {id: number_of_orders, name: 客户订单数, data_type: integer, pending_confirmation: true}
+      - {id: customer_lifetime_value, name: 客户生命周期价值, data_type: decimal, pending_confirmation: true}
   - id: order
     name: Order
     domain_id: sales
