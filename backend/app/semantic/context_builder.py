@@ -38,6 +38,7 @@ class ContextMetric(BaseModel):
     id: str
     name: str
     definition: str
+    source_dataset_id: str
     expression_kind: str
     field_id: str | None = None
     base_grain: list[str]
@@ -50,6 +51,7 @@ class ContextMetric(BaseModel):
 class ContextDimension(BaseModel):
     id: str
     name: str
+    source_dataset_id: str
     field_id: str
     is_time: bool
     synonyms: list[str]
@@ -116,12 +118,13 @@ def build_semantic_context(
     user_question: str | None = None,
     *,
     model: SemanticModel | None = None,
+    model_path: Path | None = None,
     spaces_path: Path | None = None,
 ) -> SemanticContext:
     """Build a restricted semantic context without exposing connection information."""
     if model is None:
         root = Path(__file__).resolve().parents[2]
-        model = load_semantic_model(root / "configs" / "semantic" / "jaffle_shop.yaml")
+        model = load_semantic_model(model_path or root / "configs" / "semantic" / "jaffle_shop.yaml")
     if spaces_path is None:
         spaces_path = Path(__file__).resolve().parents[2] / "configs" / "semantic" / "spaces.yaml"
     if domain_id not in {domain.id for domain in model.domains}:
@@ -270,6 +273,7 @@ def _context_metric(metric: Metric) -> ContextMetric:
         id=metric.id,
         name=metric.name,
         definition=metric.definition,
+        source_dataset_id=metric.source_dataset_id,
         expression_kind=metric.expression.kind,
         field_id=metric.expression.field_id,
         base_grain=metric.base_grain,
@@ -287,6 +291,7 @@ def _context_dimension(
     return ContextDimension(
         id=dimension.id,
         name=dimension.name,
+        source_dataset_id=dimension.source_dataset_id,
         field_id=dimension.field_id,
         is_time=dimension.is_time,
         synonyms=dimension.synonyms,
