@@ -229,3 +229,4 @@ data/demo/sales.db
 
 data/conversations.db
 data/conversations.db-*
+data/.conversation-locks/

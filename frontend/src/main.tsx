@@ -43,6 +43,7 @@ function App() {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let pending = ''
+      let terminalStatus: string | undefined
       while (true) {
         const { value, done } = await reader.read()
         pending += decoder.decode(value, { stream: !done })
@@ -57,17 +58,19 @@ function App() {
           if (kind === 'text') setAnswer(previous => previous + data.delta)
           if (kind === 'result') setResult(data)
           if (kind === 'error') setStatus(data.message)
-          if (kind === 'done' && data.status === 'completed') setStatus('查询完成')
+          if (kind === 'done') { terminalStatus = data.status; if (data.status === 'completed') setStatus('查询完成') }
         }
         if (done) break
       }
+      if (!terminalStatus) throw new Error('响应流中断')
+      if (terminalStatus !== 'completed') return
       if (activeId) {
         const detail = await fetch(`/api/conversations/${encodeURIComponent(activeId)}`)
         if (detail.ok) { setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined) }
         await loadHistory()
       }
       setQuestion('')
-    } catch { setStatus('连接失败，请检查服务是否启动') }
+    } catch { setStatus('连接中断或服务不可用，请重试') }
     finally { setBusy(false) }
   }
   return <Layout className="shell"><Layout.Sider className="sidebar" width={240}><div className="brand">Data Agent</div><div className="space">销售分析</div><div className="side-detail">Sales Space</div><Button block disabled={busy} onClick={newConversation}>新建对话</Button><div className="history-title">最近对话</div>{history.map(item => <button className="history-item" key={item.id} disabled={busy} onClick={() => openConversation(item.id)}>{item.title}</button>)}</Layout.Sider><Layout.Content className="content"><header><Typography.Title level={3}>销售分析工作台</Typography.Title><Typography.Text type="secondary">以自然语言探索销售数据</Typography.Text></header><main>{messages.map(message => <div key={message.id}><Card title={message.role === "user" ? "你" : "分析"}>{message.content}</Card>{message.role === 'assistant' && <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />}{message.result && <ResultView data={message.result} />}</div>)}<Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>例如：查询今年各城市的销售额</p></Card><div className="ask"><Input.TextArea value={question} onChange={e => setQuestion(e.target.value)} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); submit() } }} placeholder="输入销售问题" autoSize={{ minRows: 2, maxRows: 5 }}/><Button type="primary" loading={busy} onClick={submit}>发送</Button></div>{status && <p className="status">{status}</p>}{answer && <Card title="分析">{answer}</Card>}{result && <ResultView data={result} />}</main></Layout.Content></Layout>

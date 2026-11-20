@@ -1,11 +1,13 @@
 """Local conversation and query context storage."""
 import json
+from contextlib import closing, contextmanager
 import sqlite3
 import uuid
 from pathlib import Path
 
 
-def connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def connect(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, timeout=5)
     db.row_factory = sqlite3.Row
@@ -27,7 +29,8 @@ def connect(path: Path) -> sqlite3.Connection:
             FOREIGN KEY (message_id) REFERENCES messages(id)
         );
     ''')
-    return db
+    with closing(db), db:
+        yield db
 
 
 def create(path: Path, title: str) -> str:

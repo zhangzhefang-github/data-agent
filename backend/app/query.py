@@ -1,3 +1,4 @@
+from contextlib import closing
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -53,6 +54,10 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
         metrics = {name: catalog['metrics'][name] for name in query.metrics}
         dimensions = {name: catalog['dimensions'][name] for name in query.dimensions}
         filter_dimensions = {item.field: catalog['dimensions'][item.field] for item in query.filters}
+        for metric in metrics.values():
+            allowed_filters = metric.get('allowed_filters')
+            if allowed_filters is not None and any(item.field not in allowed_filters for item in query.filters):
+                raise ValueError('指标不支持该过滤字段')
         first_model = next(iter(metrics.values()))['model']
         if any(item['model'] != first_model for item in [*metrics.values(), *dimensions.values(), *filter_dimensions.values()]):
             raise ValueError('指标和维度不属于同一数据模型')
@@ -151,7 +156,7 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
                 rows = cursor.fetchall()
     else:
         uri = f'file:{quote(str(path.resolve()))}?mode=ro'
-        with sqlite3.connect(uri, uri=True, timeout=5) as db:
+        with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
             deadline = time.monotonic() + 5
             db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
             rows = db.execute(sql, parameters).fetchall()
