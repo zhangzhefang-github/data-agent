@@ -132,12 +132,27 @@ class MetricFilter(BaseModel):
     value: str
 
 
+def _record_sources(data):
+    """保留单来源 YAML。多个来源记在 source_dataset_ids，问数仍用其中第一处。"""
+    if not isinstance(data, dict):
+        return data
+    data = dict(data)
+    sources = data.get("source_dataset_ids")
+    current = data.get("source_dataset_id")
+    if sources is None and current is not None:
+        data["source_dataset_ids"] = [current]
+    elif current is None and isinstance(sources, list) and sources:
+        data["source_dataset_id"] = sources[0]
+    return data
+
+
 class Metric(BaseModel):
     id: str
     name: str
     definition: str
     expression: MetricExpression
     source_dataset_id: str
+    source_dataset_ids: list[str] = Field(min_length=1)
     base_grain: list[str] = Field(min_length=1)
     time_dimension_id: str | None = None
     default_filters: list[MetricFilter] = Field(default_factory=list)
@@ -147,16 +162,27 @@ class Metric(BaseModel):
     synonyms: list[str] = Field(default_factory=list)
     published: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_one_or_more_sources(cls, data):
+        return _record_sources(data)
+
 
 class Dimension(BaseModel):
     id: str
     name: str
     source_dataset_id: str
+    source_dataset_ids: list[str] = Field(min_length=1)
     field_id: str
     is_time: bool = False
     synonyms: list[str] = Field(default_factory=list)
     compatible_metric_ids: list[str] = Field(default_factory=list)
     user_visible: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_one_or_more_sources(cls, data):
+        return _record_sources(data)
 
 
 class Domain(BaseModel):
