@@ -14,3 +14,5 @@ Jaffle Shop 模型具有 8 个真实数据集、Customer、Order、Payment 三�
 指标表达式使用结构化聚合节点，支持 SUM、COUNT、COUNT_DISTINCT、AVG、MIN、MAX、指标引用和比例。比例声明分子、分母及分母为零时的行为。模型可表达的聚合范围高于当前确定性 Compiler 支持的子集。
 
 每个诊断包含对象、字段、代码、原因和修复建议。Hard Error 会阻止发布。真实物理 Catalog 由外部只读接口作为显式输入传入校验器，连接配置不属于模型。
+
+`profiled` 只记录只读数据探查证据。查询计划还需要点名一条获授权的 `confirmed` 数据集关系。`validate_dataset_join` 拒绝未声明、未授权、同优先级歧义及未处理 Fanout 的关联。存在 Fanout 风险时，来源必须先聚合回其声明粒度。

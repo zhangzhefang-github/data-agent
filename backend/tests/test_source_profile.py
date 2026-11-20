@@ -4,6 +4,11 @@ from pathlib import Path
 import pytest
 
 from app.semantic.catalog import profile_jaffle_shop
+from app.semantic.loader import load_semantic_model
+
+
+ROOT = Path(__file__).resolve().parents[2]
+MODEL_PATH = ROOT / "backend" / "configs" / "semantic" / "jaffle_shop.yaml"
 
 
 @pytest.fixture
@@ -67,3 +72,29 @@ def test_profile_jaffle_shop_reports_reconciled_amounts_and_fanout_without_writi
     assert profile.customer_baseline.null_order_counts == 38
     assert profile.status_values == {"completed": 67, "placed": 13, "return_pending": 2, "returned": 4, "shipped": 13}
     assert jaffle_shop_path.read_bytes() == before
+
+
+def test_real_profile_matches_the_modeled_relationship_states_and_customer_evidence(jaffle_shop_path: Path):
+    profile = profile_jaffle_shop(jaffle_shop_path)
+    model = load_semantic_model(MODEL_PATH)
+
+    assert {relationship.id: relationship.verification_status for relationship in model.business_relationships} == {
+        "customer_to_order": "proposed",
+        "order_to_payment": "proposed",
+    }
+    evidence_by_datasets = {
+        (evidence.source_dataset_id, evidence.target_dataset_id): evidence
+        for evidence in profile.relationships.values()
+    }
+    assert len(model.dataset_relationships) == len(evidence_by_datasets) == 5
+    for relationship in model.dataset_relationships:
+        evidence = evidence_by_datasets[(relationship.source_dataset_id, relationship.target_dataset_id)]
+        assert relationship.verification_status == evidence.verification_status == "profiled"
+        assert relationship.match_rate == evidence.match_rate == 1.0
+        assert relationship.orphan_count == evidence.orphan_count == 0
+
+    assert profile.customer_baseline.customers_with_orders == 62
+    assert profile.customer_baseline.customers_without_orders == 38
+    assert profile.customer_baseline.order_count_mismatches == 0
+    assert profile.customer_baseline.date_mismatches == 0
+    assert profile.customer_baseline.lifetime_value_mismatches == 0
