@@ -37,3 +37,17 @@ npm --prefix frontend run build
 当前切片支持按城市查询今年截至今天的净销售额。销售主题空间配置在 `backend/configs/sales_space.yaml`。
 
 模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。SDK Tracing 默认发送到 OpenAI，使用兼容服务密钥时可能出现 tracing 401。若没有可用的 OpenAI tracing 凭据，可以设置 `OPENAI_AGENTS_DISABLE_TRACING=true` 停止追踪导出。模型请求和本地查询仍可运行。启用追踪时，应用关闭 SDK 中的敏感内容采集。
+
+Golden Dataset 使用固定的 2026-06-01 业务日期和独立 SQLite 测试数据，运行以下命令可验证 11 条标准查询。输出包含每条实际 Query IR、SQL、执行状态、结果及失败环节。
+
+```sh
+PYTHONPATH=backend python -m app.evaluation.runner
+```
+
+要评测真实模型的自然语言解析，先加载 `.env`，然后执行：
+
+```sh
+PYTHONPATH=backend python -m app.evaluation.runner --live
+```
+
+真实模型评测会调用服务并可能产生费用。未设置密钥时逐条标记为 skipped，失败会返回非零退出码。默认输出为 JSON，可重定向到工作区以外的文件以保存每次实测记录。
