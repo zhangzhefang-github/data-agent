@@ -31,6 +31,39 @@ def test_customer_lifetime_value_is_marked_pending_confirmation():
     assert lifetime_value.pending_confirmation is True
 
 
+def test_published_model_marks_raw_to_staging_lineage_confirmed():
+    registry = SemanticModelRegistry()
+    registry.publish(load_semantic_model(MODEL_PATH))
+    published = registry.get("jaffle_shop", "1.0")
+
+    confirmed = {
+        (record.source_dataset_id, record.target_dataset_id): record.verification_status
+        for record in published.dataset_lineage
+        if record.verification_status == "confirmed"
+    }
+    assert confirmed == {
+        ("customer_source", "customer_staging"): "confirmed",
+        ("order_source", "order_staging"): "confirmed",
+        ("payment_source", "payment_staging"): "confirmed",
+    }
+
+
+def test_published_model_marks_mart_lineage_proposed_not_confirmed():
+    registry = SemanticModelRegistry()
+    registry.publish(load_semantic_model(MODEL_PATH))
+    published = registry.get("jaffle_shop", "1.0")
+
+    mart = {
+        (record.source_dataset_id, record.target_dataset_id): record.verification_status
+        for record in published.dataset_lineage
+        if record.target_dataset_id in {"customer_mart", "order_mart"}
+    }
+    assert mart == {
+        ("customer_staging", "customer_mart"): "proposed",
+        ("order_staging", "order_mart"): "proposed",
+    }
+
+
 def test_loads_and_publishes_the_real_jaffle_shop_semantic_model(monkeypatch):
     model = load_semantic_model(MODEL_PATH)
     result = validate_semantic_model(model)
