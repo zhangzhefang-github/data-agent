@@ -11,11 +11,21 @@ function App() {
   const [conversationId, setConversationId] = useState<string>()
   const [history, setHistory] = useState<ConversationSummary[]>([])
   const [messages, setMessages] = useState<Message[]>([])
+  const [spaceName, setSpaceName] = useState('销售分析')
+  const [spaceDetail, setSpaceDetail] = useState('以自然语言探索销售数据')
   async function loadHistory() {
     const response = await fetch('/api/conversations')
     if (response.ok) setHistory(await response.json())
   }
-  useEffect(() => { loadHistory().catch(() => setStatus('无法加载会话')) }, [])
+  useEffect(() => {
+    loadHistory().catch(() => setStatus('无法加载会话'))
+    fetch('/api/spaces').then(async response => {
+      if (!response.ok) return
+      const spaces = await response.json()
+      if (spaces[0]?.name) setSpaceName(spaces[0].name)
+      if (spaces[0]?.description) setSpaceDetail(spaces[0].description)
+    }).catch(() => setStatus('无法加载会话'))
+  }, [])
   async function openConversation(id: string) {
     try {
       const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`)
@@ -81,7 +91,7 @@ function App() {
   return <Layout className="shell">
     <Layout.Sider className="sidebar" width={260}>
       <div className="brand">Data Agent</div>
-      <div className="space">销售分析</div>
+      <div className="space">{spaceName}</div>
       <div className="side-detail">Sales Space</div>
       <Button block disabled={busy} onClick={newConversation}>新建对话</Button>
       <div className="history-title">最近对话</div>
@@ -89,8 +99,8 @@ function App() {
     </Layout.Sider>
     <Layout.Content className="content">
       <header>
-        <Typography.Title level={3}>销售分析工作台</Typography.Title>
-        <Typography.Text type="secondary">以自然语言探索销售数据</Typography.Text>
+        <Typography.Title level={3}>{spaceName}</Typography.Title>
+        <Typography.Text type="secondary">{spaceDetail}</Typography.Text>
       </header>
       <div className="transcript" ref={transcriptRef}>
         {messages.map(message => <div className="turn" key={message.id}>

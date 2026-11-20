@@ -1,0 +1,59 @@
+space:
+  id: orders
+  name: 订单分析
+  description: 按订单日期和状态分析订单金额与订单量
+  models:
+    orders:
+      table: orders
+      date_column: order_date
+      columns: [order_date, status, amount, credit_card_amount, coupon_amount, bank_transfer_amount, gift_card_amount]
+  metrics:
+    order_amount:
+      name: 订单金额
+      model: orders
+      expression: SUM(amount)
+      grain: [order_date, status]
+      allowed_filters: [order_date, status]
+      description: 订单应付金额
+      synonyms: [销售额, 金额]
+    order_count:
+      name: 订单量
+      model: orders
+      expression: COUNT(*)
+      grain: [order_date, status]
+      allowed_filters: [order_date, status]
+      description: 订单一行计为一笔
+    credit_card_amount:
+      name: 信用卡金额
+      model: orders
+      expression: SUM(credit_card_amount)
+      allowed_filters: [order_date, status]
+    coupon_amount:
+      name: 优惠券金额
+      model: orders
+      expression: SUM(coupon_amount)
+      allowed_filters: [order_date, status]
+    bank_transfer_amount:
+      name: 银行转账金额
+      model: orders
+      expression: SUM(bank_transfer_amount)
+      allowed_filters: [order_date, status]
+    gift_card_amount:
+      name: 礼品卡金额
+      model: orders
+      expression: SUM(gift_card_amount)
+      allowed_filters: [order_date, status]
+  dimensions:
+    order_date:
+      name: 订单日期
+      model: orders
+      column: order_date
+      synonyms: [业务日期, 日期]
+    status:
+      name: 订单状态
+      model: orders
+      column: status
+      synonyms: [状态]
+  instructions: 每一行订单计为一笔。订单金额使用 amount。只使用目录中的指标和维度。
+  sql_examples:
+    - SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status

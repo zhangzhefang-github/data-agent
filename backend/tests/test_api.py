@@ -93,7 +93,7 @@ def test_followup_preserves_filter_and_shifts_leap_day(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
     submitted = []
 
-    def fake_execute(path, plan, today, source=None):
+    def fake_execute(path, plan, today, catalog=None, source=None):
         submitted.append(plan.model_dump(mode="json"))
         return {"columns": ["sales_amount"], "rows": [[9000]], "sql": "SELECT", "source": "test", "elapsed_ms": 1}
 

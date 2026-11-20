@@ -40,7 +40,7 @@ npm --prefix frontend run build
 
 默认使用自动创建的本地 SQLite 示例数据。要读取已有 SQLite 文件，在 `.env` 设置 `SALES_SQLITE_PATH=/绝对路径/销售数据.db`。该文件以只读模式打开，不会自动创建。
 
-要读取 DuckDB 文件，在 `.env` 设置 `SALES_DUCKDB_PATH=/绝对路径/销售数据.duckdb`。服务以只读方式打开该文件，不会根据文件名猜测引擎。文件需包含销售主题空间声明的单表和字段。`SALES_DATABASE_URL` 优先于 DuckDB，DuckDB 优先于 `SALES_SQLITE_PATH`。
+要读取 DuckDB 文件，在 `.env` 设置 `SALES_DUCKDB_PATH=/绝对路径/销售数据.duckdb`。服务以只读方式打开该文件，不会根据文件名猜测引擎。文件需包含当前主题空间声明的单表和字段。`SALES_SPACE=orders` 时使用订单主题空间，物理表为 `orders`，适合 Wren 的 `jaffle_shop.duckdb`。默认 `sales` 仍使用销售汇总表。`SALES_DATABASE_URL` 优先于 DuckDB，DuckDB 优先于 `SALES_SQLITE_PATH`。
 
 要连接 PostgreSQL，在 `.env` 设置 `SALES_DATABASE_URL=postgresql://用户名:密码@主机:端口/数据库`，并为销售模型在 YAML 的 `models.sales_summary` 下添加 `schema`，同时配置允许的表、字段和指标表达式。使用仅授予该 schema 和表 SELECT 权限的数据库账户。服务使用只读事务、5 秒连接和语句超时、参数绑定及表字段白名单。三者同时设置时，PostgreSQL 优先，其次是 DuckDB，最后是 SQLite。重启后端生效。
 

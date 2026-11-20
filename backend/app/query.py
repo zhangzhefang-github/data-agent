@@ -48,6 +48,28 @@ def locate_source(sqlite_path: Path, database_url: str | None, duckdb_path: str 
     return DataSource(engine='sqlite', location=str(sqlite_path))
 
 
+def load_catalog(root: Path, space_name: str) -> dict:
+    if space_name not in {'sales', 'orders'}:
+        raise ValueError('未知主题空间')
+    path = root / 'backend' / 'configs' / f'{space_name}_space.yaml'
+    return yaml.safe_load(path.read_text())['space']
+
+
+def space_instructions(catalog: dict) -> str:
+    metrics = '、'.join(item['name'] for item in catalog['metrics'].values())
+    dimensions = '、'.join(item['name'] for item in catalog['dimensions'].values())
+    return (
+        f"你是{catalog['name']}助手。只能回答该主题空间内的问题。"
+        "先读取目录，再通过结构化工具查询，禁止回答未经查询的数值。"
+        f"支持的指标：{metrics}。支持的维度：{dimensions}。"
+        "无指定时间时查询今年截至今天。"
+        "追问去年同期时，使用最近一次成功查询的指标、维度和过滤条件，仅调整时间。"
+        "遇到写入、未授权表、未知指标或其他不支持的请求请拒绝并说明。"
+        "按查询结果用中文简短回答。若无行则说明无数据。指标为零时明确显示为0，不能说成缺失或无数据。"
+        f"{catalog.get('instructions', '')}"
+    )
+
+
 class Query(BaseModel):
     metrics: list[str] = Field(min_length=1)
     dimensions: list[str] = Field(default_factory=list)
@@ -99,12 +121,14 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
         def metric_expression(name):
             item = catalog['metrics'][name]
             expression = parse_one(item['expression'], read='sqlite')
+            if isinstance(expression, exp.Count) and isinstance(expression.this, exp.Star):
+                return 'COUNT(*)'
             if not isinstance(expression, exp.Sum) or not isinstance(expression.this, exp.Column) or expression.this.table:
-                raise ValueError('指标表达式必须是单列求和')
-            name = expression.this.name
-            if name not in allowed_columns:
+                raise ValueError('指标表达式必须是单列求和或 COUNT(*)')
+            column_name = expression.this.name
+            if column_name not in allowed_columns:
                 raise ValueError('物理映射包含未授权的字段')
-            return f'SUM("{name}")'
+            return f'SUM("{column_name}")'
 
         metric_sql = {}
         for name, item in metrics.items():

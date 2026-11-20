@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
 
-import yaml
 from agents import Agent, RunConfig, Runner, function_tool, set_tracing_export_api_key
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.query import Query, TimeRange, execute_query, locate_source
+from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
     set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
@@ -32,7 +31,7 @@ DATABASE = Path(EXTERNAL_SQLITE_PATH) if EXTERNAL_SQLITE_PATH else ROOT / "data"
 DATABASE_URL = os.getenv("SALES_DATABASE_URL") or None
 DUCKDB_PATH = os.getenv("SALES_DUCKDB_PATH") or None
 CONVERSATIONS = ROOT / "data" / "conversations.db"
-CATALOG = yaml.safe_load((ROOT / "backend" / "configs" / "sales_space.yaml").read_text())["space"]
+CATALOG = load_catalog(ROOT, os.getenv("SALES_SPACE", "sales"))
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -168,7 +167,7 @@ async def chat(request: ChatRequest):
             elif plan.time_range is None:
                 plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
             source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
-            data = execute_query(DATABASE, plan, today, source=source)
+            data = execute_query(DATABASE, plan, today, CATALOG, source=source)
             if source.engine == "sqlite" and EXTERNAL_SQLITE_PATH:
                 data['source'] = 'SQLite ADS'
             result_data.append(data)
@@ -178,15 +177,7 @@ async def chat(request: ChatRequest):
         agent = Agent(
             name="销售分析助手",
             model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-            instructions=(
-                "你是销售分析助手。只能回答销售分析问题。"
-                "先读取目录，再通过结构化工具查询，禁止回答未经查询的数值。"
-                "支持销售额、订单量和客单价，按城市、门店、产品及业务日期分组或过滤。"
-                "无指定时间时查询今年截至今天。门店排名按销售额降序排列并设置数量上限。"
-                "追问去年同期时，使用最近一次成功查询的指标、维度和过滤条件，仅调整时间。"
-                "遇到写入、未授权表、未知指标或其他不支持的请求请拒绝并说明。"
-                "按查询结果用中文简短回答，若无行则说明无数据，销售额为零时明确显示为0元，不能说成缺失或无数据。"
-            ),
+            instructions=space_instructions(CATALOG),
             tools=[get_semantic_catalog, resolve_business_terms, execute_semantic_query],
         )
         yield event("conversation", {"conversation_id": conversation_id})

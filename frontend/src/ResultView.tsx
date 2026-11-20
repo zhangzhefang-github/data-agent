@@ -4,8 +4,8 @@ import * as echarts from 'echarts'
 
 export type Result = { columns: string[], rows: (string | number | null)[][], sql: string, source: string, elapsed_ms: number }
 export type Rating = 'correct' | 'incorrect'
-const labels: Record<string, string> = { city: '城市', store: '门店', product: '产品', stat_date: '业务日期', sales_amount: '销售额（元）', order_count: '订单量', average_order_value: '客单价（元）' }
-const metrics = ['sales_amount', 'order_count', 'average_order_value']
+const labels: Record<string, string> = { city: '城市', store: '门店', product: '产品', stat_date: '业务日期', sales_amount: '销售额（元）', order_count: '订单量', average_order_value: '客单价（元）', order_date: '订单日期', status: '订单状态', order_amount: '订单金额', credit_card_amount: '信用卡金额', coupon_amount: '优惠券金额', bank_transfer_amount: '银行转账金额', gift_card_amount: '礼品卡金额' }
+const metrics = ['sales_amount', 'order_count', 'average_order_value', 'order_amount', 'credit_card_amount', 'coupon_amount', 'bank_transfer_amount', 'gift_card_amount']
 
 type ChartKind = '柱状图' | '折线图' | '饼图'
 
