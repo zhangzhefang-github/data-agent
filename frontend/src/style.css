@@ -1,0 +1,16 @@
+body { margin: 0; color: #243044; font-family: Inter, "Microsoft Yahei", sans-serif; }
+.shell { min-height: 100vh; background: #f5f7fa; }
+.sidebar { background: #172637 !important; padding: 32px 22px; color: #fff; }
+.brand { font-size: 21px; font-weight: 700; margin-bottom: 58px; }
+.space { background: #294356; border-radius: 8px; padding: 12px; font-weight: 600; }
+.side-detail { color: #9aafbd; font-size: 12px; padding: 12px; }
+.content header { background: white; padding: 24px 40px; border-bottom: 1px solid #e7ebef; }
+.content header h3 { margin: 0 0 4px; }
+main { max-width: 920px; margin: 40px auto; padding: 0 24px; display: grid; gap: 20px; }
+.intro { background: #edf5f3; border: none; padding: 12px; }
+.intro p, .status { color: #637688; }
+.ask { background: white; border-radius: 8px; padding: 14px; display: flex; align-items: end; gap: 12px; }
+.ask textarea { border: none; box-shadow: none !important; resize: none; }
+pre { white-space: pre-wrap; background: #f5f7fa; padding: 14px; }
+summary { cursor: pointer; margin-top: 24px; }
+@media (max-width: 700px) { .sidebar { display: none; } .content header { padding: 20px; } main { margin: 24px auto; } }

@@ -1,0 +1,22 @@
+space:
+  id: sales
+  name: 销售分析
+  description: 企业销售经营数据分析
+  models:
+    sales_summary:
+      table: sales_summary
+      columns: [stat_date, city, store_id, product, sales_amount, order_count]
+  metrics:
+    sales_amount:
+      name: 销售额
+      expression: SUM(sales_amount)
+      description: 人民币净销售额
+      synonyms: [销售金额, 净销售额]
+  dimensions:
+    city:
+      name: 城市
+      column: city
+      synonyms: [地区]
+  instructions: 销售额为扣除退款的人民币净销售额
+  sql_examples:
+    - SELECT city, SUM(sales_amount) FROM sales_summary GROUP BY city
