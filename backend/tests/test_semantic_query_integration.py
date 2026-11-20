@@ -20,6 +20,23 @@ def jaffle_shop_path() -> Path:
     return Path(configured_path)
 
 
+def test_order_question_totals_stay_unchanged_with_unconfirmed_mart_lineage(jaffle_shop_path: Path):
+    catalog = load_catalog(ROOT, "orders")
+    result = execute_query(
+        jaffle_shop_path,
+        Query(
+            metrics=["orders.order_count", "orders.order_amount"],
+            time_range={"start": "2018-01-01", "end": "2018-04-09"},
+        ),
+        date(2026, 11, 20),
+        catalog,
+        source=DataSource(engine="duckdb", location=str(jaffle_shop_path)),
+    )
+
+    assert result["columns"] == ["order_rows", "order_amount"]
+    assert result["rows"] == [[99, 1672.0]]
+
+
 def test_orders_catalog_is_projected_from_the_published_semantic_model():
     catalog = load_catalog(ROOT, "orders")
 

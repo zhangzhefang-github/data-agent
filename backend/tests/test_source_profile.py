@@ -74,6 +74,23 @@ def test_profile_jaffle_shop_reports_reconciled_amounts_and_fanout_without_writi
     assert jaffle_shop_path.read_bytes() == before
 
 
+def test_profile_jaffle_shop_reconciles_order_amounts_by_payment_method(jaffle_shop_path: Path):
+    before = jaffle_shop_path.read_bytes()
+    profile = profile_jaffle_shop(jaffle_shop_path)
+
+    # 期望值来自对真实库的只读汇总，不由被测实现重算。
+    assert {
+        method: (item.order_amount, item.payment_amount)
+        for method, item in profile.order_baseline.amounts_by_payment_method.items()
+    } == {
+        "credit_card": (871.0, 871.0),
+        "coupon": (185.0, 185.0),
+        "bank_transfer": (411.0, 411.0),
+        "gift_card": (205.0, 205.0),
+    }
+    assert jaffle_shop_path.read_bytes() == before
+
+
 def test_real_profile_matches_the_modeled_relationship_states_and_customer_evidence(jaffle_shop_path: Path):
     profile = profile_jaffle_shop(jaffle_shop_path)
     model = load_semantic_model(MODEL_PATH)
