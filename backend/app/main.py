@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
 
 import yaml
-from agents import Agent, Runner, function_tool
+from agents import Agent, RunConfig, Runner, function_tool
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -85,13 +85,13 @@ async def chat(request: ChatRequest):
                 "先读取目录，再通过结构化工具查询，禁止回答未经查询的数值。"
                 "当前只支持按城市汇总销售额，今年截至今天。"
                 "遇到写入、未授权表、未知指标或其他不支持的请求请拒绝并说明。"
-                "按查询结果用中文简短回答，若无行则说明无数据。"
+                "按查询结果用中文简短回答，若无行则说明无数据，销售额为零时明确显示为0元，不能说成缺失或无数据。"
             ),
             tools=[get_semantic_catalog, resolve_business_terms, execute_semantic_query],
         )
         yield event("status", {"status": "running"})
         try:
-            run = Runner.run_streamed(agent, request.message)
+            run = Runner.run_streamed(agent, request.message, run_config=RunConfig(trace_include_sensitive_data=False))
             async for item in run.stream_events():
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
                     yield event("text", {"delta": item.data.delta})

@@ -5,16 +5,19 @@ space:
   models:
     sales_summary:
       table: sales_summary
+      date_column: stat_date
       columns: [stat_date, city, store_id, product, sales_amount, order_count]
   metrics:
     sales_amount:
       name: 销售额
+      model: sales_summary
       expression: SUM(sales_amount)
       description: 人民币净销售额
       synonyms: [销售金额, 净销售额]
   dimensions:
     city:
       name: 城市
+      model: sales_summary
       column: city
       synonyms: [地区]
   instructions: 销售额为扣除退款的人民币净销售额

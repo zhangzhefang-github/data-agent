@@ -35,3 +35,5 @@ npm --prefix frontend run build
 ```
 
 当前切片支持按城市查询今年截至今天的净销售额。销售主题空间配置在 `backend/configs/sales_space.yaml`。
+
+模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。SDK Tracing 默认发送到 OpenAI，使用兼容服务密钥时可能出现 tracing 401。若没有可用的 OpenAI tracing 凭据，可以设置 `OPENAI_AGENTS_DISABLE_TRACING=true` 停止追踪导出。模型请求和本地查询仍可运行。启用追踪时，应用关闭 SDK 中的敏感内容采集。
