@@ -2,7 +2,8 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime
+import re
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.query import Query, execute_query
+from app.query import Query, TimeRange, execute_query
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,7 @@ DATABASE = ROOT / "data" / "demo" / "sales.db"
 CONVERSATIONS = ROOT / "data" / "conversations.db"
 CATALOG = yaml.safe_load((ROOT / "backend" / "configs" / "sales_space.yaml").read_text())["space"]
 app = FastAPI()
+active_conversations: set[str] = set()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -70,6 +72,13 @@ def event(kind: str, payload: dict) -> str:
     return f"event: {kind}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def last_year(day: date) -> date:
+    try:
+        return day.replace(year=day.year - 1)
+    except ValueError:
+        return day.replace(year=day.year - 1, day=28)
+
+
 @app.post("/api/chat/stream")
 async def chat(request: ChatRequest):
     if request.conversation_id:
@@ -80,12 +89,30 @@ async def chat(request: ChatRequest):
     else:
         conversation_id = conversations.create(CONVERSATIONS, request.message)
         conversation = conversations.get(CONVERSATIONS, conversation_id)
-    conversations.add_message(CONVERSATIONS, conversation_id, "user", request.message)
+    if conversation_id in active_conversations:
+        raise HTTPException(status_code=409, detail="该会话正在查询，请稍后再试")
+    active_conversations.add(conversation_id)
+    try:
+        conversations.add_message(CONVERSATIONS, conversation_id, "user", request.message)
+    except Exception:
+        active_conversations.discard(conversation_id)
+        raise
 
     async def stream():
         result_data = []
         query_data = []
         answer = []
+        context = conversation["last_query"] if conversation else None
+        is_previous_period = bool(re.fullmatch(r"\s*去年同期(?:呢|是多少|怎么样)?[？?。！!\s]*", request.message))
+
+        if is_previous_period and not context:
+            message = "请先提供需要对比的销售查询，再询问去年同期。"
+            yield event("conversation", {"conversation_id": conversation_id})
+            yield event("text", {"delta": message})
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
+            yield event("message", {"id": message_id})
+            yield event("done", {"status": "completed"})
+            return
 
         @function_tool
         def get_semantic_catalog() -> str:
@@ -101,6 +128,12 @@ async def chat(request: ChatRequest):
         def execute_semantic_query(plan: Query) -> str:
             """Execute a validated structured query against the sales space."""
             today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+            if is_previous_period and context:
+                plan = Query.model_validate(context)
+                previous_range = plan.time_range or TimeRange(start=today.replace(month=1, day=1), end=today)
+                plan = plan.model_copy(update={"time_range": TimeRange(start=last_year(previous_range.start), end=last_year(previous_range.end))})
+            elif plan.time_range is None:
+                plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
             data = execute_query(DATABASE, plan, today)
             result_data.append(data)
             query_data.append(plan.model_dump(mode="json"))
@@ -114,6 +147,7 @@ async def chat(request: ChatRequest):
                 "先读取目录，再通过结构化工具查询，禁止回答未经查询的数值。"
                 "支持销售额、订单量和客单价，按城市、门店、产品及业务日期分组或过滤。"
                 "无指定时间时查询今年截至今天。门店排名按销售额降序排列并设置数量上限。"
+                "追问去年同期时，使用最近一次成功查询的指标、维度和过滤条件，仅调整时间。"
                 "遇到写入、未授权表、未知指标或其他不支持的请求请拒绝并说明。"
                 "按查询结果用中文简短回答，若无行则说明无数据，销售额为零时明确显示为0元，不能说成缺失或无数据。"
             ),
@@ -122,7 +156,6 @@ async def chat(request: ChatRequest):
         yield event("conversation", {"conversation_id": conversation_id})
         yield event("status", {"status": "running"})
         try:
-            context = conversation["last_query"] if conversation else None
             prompt = request.message
             if context:
                 prompt = f"最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"
@@ -146,4 +179,11 @@ async def chat(request: ChatRequest):
             yield event("error", {"message": "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
             yield event("done", {"status": "failed"})
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    async def guarded_stream():
+        try:
+            async for item in stream():
+                yield item
+        finally:
+            active_conversations.discard(conversation_id)
+
+    return StreamingResponse(guarded_stream(), media_type="text/event-stream")

@@ -17,3 +17,9 @@ summary { cursor: pointer; margin-top: 24px; }
 .history-title { color: #9aafbd; margin: 28px 0 10px; font-size: 12px; }
 .history-item { display: block; width: 100%; color: #d8e2e8; text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .history-item:hover { background: #294356; }
+@media (max-width: 700px) {
+  .shell { flex-direction: column; }
+  .sidebar { display: block; flex: 0 0 auto !important; max-width: none !important; width: 100% !important; padding: 16px; }
+  .brand { margin-bottom: 12px; }
+  .history-title { margin-top: 16px; }
+}
