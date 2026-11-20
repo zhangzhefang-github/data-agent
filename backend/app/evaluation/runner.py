@@ -162,7 +162,7 @@ def run_live(case_id=None):
                     # Compare the exact result returned by the live tool, not just its replay.
                     report['actual_rows'] = response['result']['rows']
                     report['sql'] = response['result']['sql']
-                    if report['actual_rows'] != case['expected_rows']:
+                    if report['status'] == 'passed' and report['actual_rows'] != case['expected_rows']:
                         report.update(status='failed', failure_stage='database_execution')
                     reports.append(report)
     return {'mode': 'live', 'clock': dataset['clock'], 'cases': reports}
