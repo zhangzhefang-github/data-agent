@@ -40,9 +40,11 @@ npm --prefix frontend run build
 
 默认使用自动创建的本地 SQLite 示例数据。要读取已有 SQLite 文件，在 `.env` 设置 `SALES_SQLITE_PATH=/绝对路径/销售数据.db`。该文件以只读模式打开，不会自动创建。
 
-要连接 PostgreSQL，在 `.env` 设置 `SALES_DATABASE_URL=postgresql://用户名:密码@主机:端口/数据库`，并为销售模型在 YAML 的 `models.sales_summary` 下添加 `schema`，同时配置允许的表、字段和指标表达式。使用仅授予该 schema 和表 SELECT 权限的数据库账户。服务使用只读事务、5 秒连接和语句超时、参数绑定及表字段白名单。`SALES_DATABASE_URL` 设置后优先于 `SALES_SQLITE_PATH`。重启后端生效。
+要读取 DuckDB 文件，在 `.env` 设置 `SALES_DUCKDB_PATH=/绝对路径/销售数据.duckdb`。服务以只读方式打开该文件，不会根据文件名猜测引擎。文件需包含销售主题空间声明的单表和字段。`SALES_DATABASE_URL` 优先于 DuckDB，DuckDB 优先于 `SALES_SQLITE_PATH`。
 
-接入前需验证业务日期与物理字段类型、销售额和退款口径、订单粒度，以及订单量在每个启用维度上可加总。当前实现支持 PostgreSQL 与 SQLite，生产数据接入需要使用具体目标库完成连通性和口径验收。
+要连接 PostgreSQL，在 `.env` 设置 `SALES_DATABASE_URL=postgresql://用户名:密码@主机:端口/数据库`，并为销售模型在 YAML 的 `models.sales_summary` 下添加 `schema`，同时配置允许的表、字段和指标表达式。使用仅授予该 schema 和表 SELECT 权限的数据库账户。服务使用只读事务、5 秒连接和语句超时、参数绑定及表字段白名单。三者同时设置时，PostgreSQL 优先，其次是 DuckDB，最后是 SQLite。重启后端生效。
+
+接入前需验证业务日期与物理字段类型、销售额和退款口径、订单粒度，以及订单量在每个启用维度上可加总。当前实现支持 PostgreSQL、DuckDB 与 SQLite，生产数据接入需要使用具体目标库完成连通性和口径验收。
 
 模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。追踪导出默认关闭。需要 OpenAI Tracing 时，单独设置 `OPENAI_TRACING_API_KEY` 为有效的 OpenAI 密钥。模型服务密钥独立保存在 `OPENAI_API_KEY`。启用追踪时，应用关闭 SDK 中的敏感内容采集。
 

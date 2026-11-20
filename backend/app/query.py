@@ -35,6 +35,19 @@ class OrderBy(BaseModel):
     direction: Literal['asc', 'desc'] = 'asc'
 
 
+class DataSource(BaseModel):
+    engine: Literal['sqlite', 'postgresql', 'duckdb']
+    location: str
+
+
+def locate_source(sqlite_path: Path, database_url: str | None, duckdb_path: str | None) -> DataSource:
+    if database_url:
+        return DataSource(engine='postgresql', location=database_url)
+    if duckdb_path:
+        return DataSource(engine='duckdb', location=duckdb_path)
+    return DataSource(engine='sqlite', location=str(sqlite_path))
+
+
 class Query(BaseModel):
     metrics: list[str] = Field(min_length=1)
     dimensions: list[str] = Field(default_factory=list)
@@ -44,7 +57,9 @@ class Query(BaseModel):
     limit: int = Field(default=500, ge=1, le=500)
 
 
-def execute_query(path: Path, query: Query, today: date, catalog: dict | None = None, database_url: str | None = None) -> dict:
+def execute_query(path: Path, query: Query, today: date, catalog: dict | None = None, database_url: str | None = None, source: DataSource | None = None) -> dict:
+    if source is None:
+        source = DataSource(engine='postgresql', location=database_url) if database_url else DataSource(engine='sqlite', location=str(path))
     if catalog is None:
         config = Path(__file__).resolve().parents[1] / 'configs' / 'sales_space.yaml'
         catalog = yaml.safe_load(config.read_text())['space']
@@ -113,7 +128,7 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
     for item in query.filters:
         conditions.append(f'{filter_sql[item.field]} {operators[item.operator]} ?')
         parameters.append(item.value)
-    if database_url and not schema:
+    if source.engine == 'postgresql' and not schema:
         raise ValueError('PostgreSQL 数据模型必须指定授权 schema')
     table_reference = f'"{schema}"."{table}"' if schema else f'"{table}"'
     sql = f'SELECT {", ".join(selections)} FROM {table_reference} WHERE {" AND ".join(conditions)}'
@@ -142,28 +157,44 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
         raise ValueError('查询包含未授权的字段')
 
     start = time.monotonic()
-    if database_url:
-        from urllib.parse import urlsplit
-        import psycopg
-
-        if urlsplit(database_url).scheme not in ('postgres', 'postgresql'):
-            raise ValueError('只支持 PostgreSQL 连接地址')
-        with psycopg.connect(database_url, connect_timeout=5) as db:
-            with db.cursor() as cursor:
-                cursor.execute('SET TRANSACTION READ ONLY')
-                cursor.execute("SET LOCAL statement_timeout = '5s'")
-                cursor.execute(sql.replace('?', '%s'), parameters)
-                rows = cursor.fetchall()
-    else:
-        uri = f'file:{quote(str(path.resolve()))}?mode=ro'
-        with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
-            deadline = time.monotonic() + 5
-            db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
-            rows = db.execute(sql, parameters).fetchall()
+    rows = fetch_rows(source, sql, parameters)
+    labels = {'postgresql': 'PostgreSQL ADS', 'duckdb': 'DuckDB', 'sqlite': 'SQLite 示例数据'}
     return {
         'columns': [*query.dimensions, *query.metrics],
         'rows': [[value.isoformat() if isinstance(value, date) else float(value) if isinstance(value, Decimal) else value for value in row] for row in rows],
         'sql': sql,
-        'source': 'PostgreSQL ADS' if database_url else 'SQLite 示例数据',
+        'source': labels[source.engine],
         'elapsed_ms': round((time.monotonic() - start) * 1000, 2),
     }
+
+
+def fetch_rows(source: DataSource, sql: str, parameters: list):
+    if source.engine == 'postgresql':
+        from urllib.parse import urlsplit
+        import psycopg
+
+        if urlsplit(source.location).scheme not in ('postgres', 'postgresql'):
+            raise ValueError('只支持 PostgreSQL 连接地址')
+        with psycopg.connect(source.location, connect_timeout=5) as db:
+            with db.cursor() as cursor:
+                cursor.execute('SET TRANSACTION READ ONLY')
+                cursor.execute("SET LOCAL statement_timeout = '5s'")
+                cursor.execute(sql.replace('?', '%s'), parameters)
+                return cursor.fetchall()
+    if source.engine == 'duckdb':
+        import duckdb
+
+        import threading
+
+        with duckdb.connect(source.location, read_only=True) as db:
+            timer = threading.Timer(5, db.interrupt)
+            timer.start()
+            try:
+                return db.execute(sql, parameters).fetchall()
+            finally:
+                timer.cancel()
+    uri = f'file:{quote(str(Path(source.location).resolve()))}?mode=ro'
+    with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
+        deadline = time.monotonic() + 5
+        db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+        return db.execute(sql, parameters).fetchall()

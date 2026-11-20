@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.query import Query, execute_query
+from app.query import DataSource, Query, execute_query
 
 
 def test_city_totals_include_current_year_only(tmp_path: Path):
@@ -111,6 +111,58 @@ def test_filters_time_boundaries_and_rejects_unknown_fields(tmp_path: Path):
     ]:
         with pytest.raises(ValueError):
             execute_query(path, query, date(2026, 6, 1))
+
+
+def test_duckdb_source_returns_current_year_city_totals(tmp_path: Path):
+    import duckdb
+
+    path = tmp_path / "warehouse.db"
+    connection = duckdb.connect(str(path))
+    connection.execute("CREATE TABLE sales_summary (stat_date VARCHAR, city VARCHAR, sales_amount INTEGER)")
+    connection.executemany("INSERT INTO sales_summary VALUES (?, ?, ?)", [
+        ("2026-01-01", "北京", 100),
+        ("2026-06-01", "北京", 25),
+        ("2026-03-01", "上海", 0),
+        ("2025-12-31", "北京", 1000),
+    ])
+    connection.close()
+    result = execute_query(
+        tmp_path / "unused.sqlite",
+        Query(metrics=["sales_amount"], dimensions=["city"]),
+        date(2026, 6, 1),
+        source=DataSource(engine="duckdb", location=str(path)),
+    )
+    assert result["rows"] == [["上海", 0], ["北京", 125]]
+    assert result["source"] == "DuckDB"
+
+
+def test_missing_duckdb_file_is_not_created(tmp_path: Path):
+    path = tmp_path / "missing.duckdb"
+    with pytest.raises(Exception):
+        execute_query(path, Query(metrics=["sales_amount"], dimensions=["city"]), date(2026, 6, 1), source=DataSource(engine="duckdb", location=str(path)))
+    assert not path.exists()
+
+
+def test_duckdb_suffix_does_not_select_duckdb(tmp_path: Path):
+    import duckdb
+
+    path = tmp_path / "sales.duckdb"
+    connection = duckdb.connect(str(path))
+    connection.execute("CREATE TABLE sales_summary (stat_date VARCHAR, city VARCHAR, sales_amount INTEGER)")
+    connection.execute("INSERT INTO sales_summary VALUES ('2026-01-01', '北京', 10)")
+    connection.close()
+    with pytest.raises(sqlite3.DatabaseError):
+        execute_query(path, Query(metrics=["sales_amount"], dimensions=["city"]), date(2026, 6, 1))
+
+
+def test_database_locator_prefers_postgres_then_duckdb(tmp_path: Path):
+    from app.query import locate_source
+
+    sqlite_path = tmp_path / "sales.db"
+    duckdb_path = tmp_path / "sales.duckdb"
+    assert locate_source(sqlite_path, "postgresql://localhost/sales", str(duckdb_path)) == DataSource(engine="postgresql", location="postgresql://localhost/sales")
+    assert locate_source(sqlite_path, None, str(duckdb_path)) == DataSource(engine="duckdb", location=str(duckdb_path))
+    assert locate_source(sqlite_path, None, None) == DataSource(engine="sqlite", location=str(sqlite_path))
 
 
 def test_postgres_requires_valid_scheme_and_schema(tmp_path: Path):

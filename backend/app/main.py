@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.query import Query, TimeRange, execute_query
+from app.query import Query, TimeRange, execute_query, locate_source
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
     set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 EXTERNAL_SQLITE_PATH = os.getenv("SALES_SQLITE_PATH")
 DATABASE = Path(EXTERNAL_SQLITE_PATH) if EXTERNAL_SQLITE_PATH else ROOT / "data" / "demo" / "sales.db"
 DATABASE_URL = os.getenv("SALES_DATABASE_URL") or None
+DUCKDB_PATH = os.getenv("SALES_DUCKDB_PATH") or None
 CONVERSATIONS = ROOT / "data" / "conversations.db"
 CATALOG = yaml.safe_load((ROOT / "backend" / "configs" / "sales_space.yaml").read_text())["space"]
 app = FastAPI()
@@ -43,7 +44,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 def setup():
-    if not DATABASE_URL and not EXTERNAL_SQLITE_PATH:
+    if locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH).engine == "sqlite" and not EXTERNAL_SQLITE_PATH:
         initialize(DATABASE)
 
 
@@ -166,11 +167,9 @@ async def chat(request: ChatRequest):
                 plan = plan.model_copy(update={"time_range": TimeRange(start=last_year(previous_range.start), end=last_year(previous_range.end))})
             elif plan.time_range is None:
                 plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
-            if DATABASE_URL:
-                data = execute_query(DATABASE, plan, today, database_url=DATABASE_URL)
-            else:
-                data = execute_query(DATABASE, plan, today)
-            if EXTERNAL_SQLITE_PATH and not DATABASE_URL:
+            source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
+            data = execute_query(DATABASE, plan, today, source=source)
+            if source.engine == "sqlite" and EXTERNAL_SQLITE_PATH:
                 data['source'] = 'SQLite ADS'
             result_data.append(data)
             query_data.append(plan.model_dump(mode="json"))
