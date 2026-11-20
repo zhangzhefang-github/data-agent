@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.semantic.loader import load_semantic_model
 from app.semantic.models import Dataset, Dimension, Metric, SemanticModel
+from app.semantic.registry import SemanticModelRegistry
 
 
 # Query IR 目前只编译 sum 和 count。规范模型保留更宽的表达式，Space 不能把其余种类放进运行时。
@@ -45,7 +46,7 @@ class ContextMetric(BaseModel):
     source_dataset_id: str
     expression_kind: str
     field_id: str | None = None
-    base_grain: list[str]
+    base_grain: list[str] = Field(exclude=True)
     time_dimension_id: str | None = None
     compatible_dimension_ids: list[str]
     synonyms: list[str]
@@ -66,8 +67,8 @@ class ContextDataset(BaseModel):
     id: str
     name: str
     dataset_type: str
-    grain: list[str]
-    primary_key: list[str]
+    grain: list[str] = Field(exclude=True)
+    primary_key: list[str] = Field(exclude=True)
     physical_object: str
     physical_object_type: str
     columns: dict[str, str]
@@ -128,7 +129,10 @@ def build_semantic_context(
     """Build a restricted semantic context without exposing connection information."""
     if model is None:
         root = Path(__file__).resolve().parents[2]
-        model = load_semantic_model(model_path or root / "configs" / "semantic" / "jaffle_shop.yaml")
+        loaded = load_semantic_model(model_path or root / "configs" / "semantic" / "jaffle_shop.yaml")
+        registry = SemanticModelRegistry()
+        registry.publish(loaded)
+        model = registry.get(loaded.id, loaded.version)
     if spaces_path is None:
         spaces_path = Path(__file__).resolve().parents[2] / "configs" / "semantic" / "spaces.yaml"
     if domain_id not in {domain.id for domain in model.domains}:
@@ -176,7 +180,9 @@ def build_semantic_context(
             sql_examples=space.sql_examples,
         ),
         sql=SqlSemanticContext(
-            datasets=[_context_dataset(dataset) for dataset in selected_datasets],
+            datasets=[
+                _context_dataset(dataset, selected_metrics, selected_dimensions) for dataset in selected_datasets
+            ],
             relationships=[_context_relationship(relationship) for relationship in selected_relationships],
         ),
         internal=InternalSemanticContext(
@@ -241,8 +247,6 @@ def _select_terms(
     }
     if not selected_metrics and not selected_dimensions:
         return set(space.metric_ids), set(space.dimension_ids)
-    if not selected_metrics:
-        selected_metrics = set(space.metric_ids)
     return selected_metrics, selected_dimensions
 
 
@@ -308,7 +312,22 @@ def _context_dimension(
     )
 
 
-def _context_dataset(dataset: Dataset) -> ContextDataset:
+def _context_dataset(dataset: Dataset, metrics: list[Metric], dimensions: list[Dimension]) -> ContextDataset:
+    referenced = {dimension.field_id for dimension in dimensions if dimension.source_dataset_id == dataset.id}
+    referenced.update(
+        metric.expression.field_id
+        for metric in metrics
+        if metric.source_dataset_id == dataset.id and metric.expression.field_id
+    )
+    fields = {field.id: field for field in dataset.fields}
+    columns = {
+        field_id: dataset.physical_mapping.column_mappings[field_id]
+        for field_id in referenced
+        if field_id not in dataset.primary_key
+        and field_id in fields
+        and not fields[field_id].sensitive
+        and field_id in dataset.physical_mapping.column_mappings
+    }
     return ContextDataset(
         id=dataset.id,
         name=dataset.name,
@@ -317,7 +336,7 @@ def _context_dataset(dataset: Dataset) -> ContextDataset:
         primary_key=dataset.primary_key,
         physical_object=dataset.physical_mapping.object_name,
         physical_object_type=dataset.physical_mapping.object_type,
-        columns=dataset.physical_mapping.column_mappings,
+        columns=columns,
     )
 
 

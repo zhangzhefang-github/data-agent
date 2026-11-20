@@ -61,6 +61,53 @@ def test_orders_context_without_matches_returns_the_authorized_catalog_in_stable
     ]
 
 
+def test_orders_context_serialization_omits_technical_keys_and_unapproved_fields():
+    context = build_semantic_context(
+        "sales", "orders", model=load_semantic_model(MODEL_PATH), spaces_path=SPACES_PATH
+    )
+
+    payload = context.model_dump()
+    dataset = payload["sql"]["datasets"][0]
+    assert "primary_key" not in dataset
+    assert "grain" not in dataset
+    assert "base_grain" not in payload["business"]["metrics"][0]
+    assert set(dataset["columns"]) == {
+        "order_date",
+        "status",
+        "amount",
+        "credit_card_amount",
+        "coupon_amount",
+        "bank_transfer_amount",
+        "gift_card_amount",
+    }
+    serialized = context.model_dump_json()
+    assert "order_id" not in serialized
+    assert "customer_id" not in serialized
+    assert context.business.metrics[0].base_grain == ["order_id"]
+
+
+def test_default_context_rejects_a_model_that_cannot_be_published(tmp_path: Path):
+    semantic = tmp_path / "semantic"
+    semantic.mkdir()
+    model_text = MODEL_PATH.read_text().replace("primary_key: [order_id]", "primary_key: [not_a_field]", 1)
+    model_path = semantic / "jaffle_shop.yaml"
+    model_path.write_text(model_text)
+    spaces_path = semantic / "spaces.yaml"
+    spaces_path.write_text(SPACES_PATH.read_text())
+
+    with pytest.raises(ValueError, match="not published"):
+        build_semantic_context("sales", "orders", model_path=model_path, spaces_path=spaces_path)
+
+
+def test_orders_context_keeps_dimension_only_match_from_adding_every_metric():
+    context = build_semantic_context(
+        "sales", "orders", "订单状态", model=load_semantic_model(MODEL_PATH), spaces_path=SPACES_PATH
+    )
+
+    assert [metric.id for metric in context.business.metrics] == []
+    assert [dimension.id for dimension in context.business.dimensions] == ["orders.status"]
+
+
 def test_orders_context_accepts_legacy_alias_when_selecting_a_metric():
     context = build_semantic_context(
         "sales", "orders", "order_rows", model=load_semantic_model(MODEL_PATH), spaces_path=SPACES_PATH
