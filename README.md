@@ -34,7 +34,15 @@ PYTHONPATH=backend pytest backend/tests
 npm --prefix frontend run build
 ```
 
-当前切片支持按城市查询今年截至今天的净销售额。销售主题空间配置在 `backend/configs/sales_space.yaml`。
+支持销售额、订单量和客单价，按城市、门店、产品和业务日期分组或过滤。销售主题空间和物理字段映射配置在 `backend/configs/sales_space.yaml`。
+
+## 接入已授权 ADS
+
+默认使用自动创建的本地 SQLite 示例数据。要读取已有 SQLite 文件，在 `.env` 设置 `SALES_SQLITE_PATH=/绝对路径/销售数据.db`。该文件以只读模式打开，不会自动创建。
+
+要连接 PostgreSQL，在 `.env` 设置 `SALES_DATABASE_URL=postgresql://用户名:密码@主机:端口/数据库`，并为销售模型在 YAML 的 `models.sales_summary` 下添加 `schema`，同时配置允许的表、字段和指标表达式。使用仅授予该 schema 和表 SELECT 权限的数据库账户。服务使用只读事务、5 秒连接和语句超时、参数绑定及表字段白名单。`SALES_DATABASE_URL` 设置后优先于 `SALES_SQLITE_PATH`。重启后端生效。
+
+接入前需验证业务日期与物理字段类型、销售额和退款口径、订单粒度，以及订单量在每个启用维度上可加总。当前实现支持 PostgreSQL 与 SQLite，生产数据接入需要使用具体目标库完成连通性和口径验收。
 
 模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。SDK Tracing 默认发送到 OpenAI，使用兼容服务密钥时可能出现 tracing 401。若没有可用的 OpenAI tracing 凭据，可以设置 `OPENAI_AGENTS_DISABLE_TRACING=true` 停止追踪导出。模型请求和本地查询仍可运行。启用追踪时，应用关闭 SDK 中的敏感内容采集。
 

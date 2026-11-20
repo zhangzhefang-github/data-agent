@@ -46,6 +46,34 @@ def test_conversation_is_created_and_reopened(monkeypatch, tmp_path):
         assert client.get("/api/conversations").json()[0]["id"] == conversation_id
 
 
+def test_agent_receives_current_business_date(monkeypatch, tmp_path):
+    from datetime import datetime
+    from types import SimpleNamespace
+    from app import main
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 1, 12, tzinfo=tz)
+
+    class Reply:
+        async def stream_events(self):
+            yield SimpleNamespace(type='raw_response_event', data=SimpleNamespace(type='response.output_text.delta', delta='完成'))
+
+    prompts = []
+    def run(agent, prompt, **kwargs):
+        prompts.append(prompt)
+        return Reply()
+
+    monkeypatch.setattr(main, 'datetime', FixedDatetime)
+    monkeypatch.setattr(main, 'CONVERSATIONS', tmp_path / 'conversations.db')
+    monkeypatch.setattr(main.Runner, 'run_streamed', run)
+    with TestClient(app) as client:
+        client.post('/api/chat/stream', json={'message': '查询今年销售额'})
+    assert '2026-06-01' in prompts[0]
+    assert 'Asia/Shanghai' in prompts[0]
+
+
 def test_followup_requires_previous_query_and_is_isolated(monkeypatch, tmp_path):
     from app import main
 
