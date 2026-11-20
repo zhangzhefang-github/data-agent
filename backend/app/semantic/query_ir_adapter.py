@@ -52,15 +52,15 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
     if len(model_ids) != 1:
         raise ValueError("当前 Query IR 只能消费一个语义数据集")
     model = datasets[model_ids.pop()]
-    date_dimension = next(dimension for dimension in context.business.dimensions if dimension.is_time)
+    date_dimension = next((dimension for dimension in context.business.dimensions if dimension.is_time), None)
     return {
         "id": context.space_id,
         "name": context.space_name,
-        "description": "由已发布规范语义模型授权的查询目录",
+        "description": "由已发布规范语义模型授权的指标和维度",
         "models": {
             model.id: {
                 "table": model.physical_object,
-                "date_column": model.columns[date_dimension.field_id],
+                "date_column": None if date_dimension is None else model.columns[date_dimension.field_id],
                 "columns": sorted(exposed_columns),
             }
         },
