@@ -1,0 +1,302 @@
+{
+  "clock": "2026-06-01",
+  "cases": [
+    {
+      "id": "cities",
+      "question": "查询今年各城市销售额",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [
+          "city"
+        ],
+        "filters": []
+      },
+      "standard_logic": "按城市汇总今年净销售额",
+      "expected_rows": [
+        [
+          "上海",
+          200
+        ],
+        [
+          "北京",
+          400
+        ],
+        [
+          "广州",
+          0
+        ]
+      ]
+    },
+    {
+      "id": "top_stores",
+      "question": "查询销售额最高的两家门店",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [
+          "store"
+        ],
+        "filters": [],
+        "order_by": {
+          "field": "sales_amount",
+          "direction": "desc"
+        },
+        "limit": 2
+      },
+      "standard_logic": "按门店汇总，销售额倒序、门店ID升序取前2名",
+      "expected_rows": [
+        [
+          "BJ01",
+          300
+        ],
+        [
+          "SH01",
+          200
+        ]
+      ]
+    },
+    {
+      "id": "beijing",
+      "question": "今年北京销售额是多少",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [],
+        "filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "北京"
+          }
+        ]
+      },
+      "standard_logic": "筛选北京并汇总销售额",
+      "expected_rows": [
+        [
+          400
+        ]
+      ]
+    },
+    {
+      "id": "previous",
+      "question": "去年同期呢",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [],
+        "filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "北京"
+          }
+        ],
+        "time_range": {
+          "start": "2025-01-01",
+          "end": "2025-06-01"
+        }
+      },
+      "standard_logic": "保留北京筛选，将今年时间范围向前移动一年",
+      "expected_rows": [
+        [
+          80
+        ]
+      ],
+      "previous_question": "今年北京销售额是多少"
+    },
+    {
+      "id": "product",
+      "question": "今年商品A各城市销售额",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [
+          "city"
+        ],
+        "filters": [
+          {
+            "field": "product",
+            "operator": "eq",
+            "value": "商品A"
+          }
+        ]
+      },
+      "standard_logic": "筛选商品A，按城市汇总销售额",
+      "expected_rows": [
+        [
+          "北京",
+          400
+        ],
+        [
+          "广州",
+          0
+        ]
+      ]
+    },
+    {
+      "id": "orders",
+      "question": "今年各城市订单量",
+      "expected_plan": {
+        "metrics": [
+          "order_count"
+        ],
+        "dimensions": [
+          "city"
+        ],
+        "filters": []
+      },
+      "standard_logic": "按城市汇总订单量",
+      "expected_rows": [
+        [
+          "上海",
+          4
+        ],
+        [
+          "北京",
+          4
+        ],
+        [
+          "广州",
+          0
+        ]
+      ]
+    },
+    {
+      "id": "aov",
+      "question": "今年各城市客单价",
+      "expected_plan": {
+        "metrics": [
+          "average_order_value"
+        ],
+        "dimensions": [
+          "city"
+        ],
+        "filters": []
+      },
+      "standard_logic": "各城市汇总销售额除以汇总订单量，零分母为空",
+      "expected_rows": [
+        [
+          "上海",
+          50.0
+        ],
+        [
+          "北京",
+          100.0
+        ],
+        [
+          "广州",
+          null
+        ]
+      ]
+    },
+    {
+      "id": "dates",
+      "question": "今年6月1日北京销售额",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [],
+        "filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "北京"
+          }
+        ],
+        "time_range": {
+          "start": "2026-06-01",
+          "end": "2026-06-01"
+        }
+      },
+      "standard_logic": "筛选北京及2026年6月1日",
+      "expected_rows": [
+        [
+          300
+        ]
+      ]
+    },
+    {
+      "id": "boundary",
+      "question": "2025年12月31日至2026年1月1日北京销售额",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [],
+        "filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "北京"
+          }
+        ],
+        "time_range": {
+          "start": "2025-12-31",
+          "end": "2026-01-01"
+        }
+      },
+      "standard_logic": "筛选北京，日期起止包含2025年12月31日和2026年1月1日",
+      "expected_rows": [
+        [
+          200
+        ]
+      ]
+    },
+    {
+      "id": "none",
+      "question": "今年深圳销售额",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [],
+        "filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "深圳"
+          }
+        ]
+      },
+      "standard_logic": "筛选深圳，无匹配行",
+      "expected_rows": []
+    },
+    {
+      "id": "by_date",
+      "question": "今年北京按日期统计销售额",
+      "expected_plan": {
+        "metrics": [
+          "sales_amount"
+        ],
+        "dimensions": [
+          "stat_date"
+        ],
+        "filters": [
+          {
+            "field": "city",
+            "operator": "eq",
+            "value": "北京"
+          }
+        ]
+      },
+      "standard_logic": "筛选北京，按业务日期汇总",
+      "expected_rows": [
+        [
+          "2026-01-01",
+          100
+        ],
+        [
+          "2026-06-01",
+          300
+        ]
+      ]
+    }
+  ]
+}
