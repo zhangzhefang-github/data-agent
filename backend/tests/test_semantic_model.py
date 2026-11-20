@@ -15,6 +15,22 @@ ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = ROOT / "backend" / "configs" / "semantic" / "jaffle_shop.yaml"
 
 
+def test_customer_order_count_is_marked_pending_confirmation():
+    model = load_semantic_model(MODEL_PATH)
+    customer = next(item for item in model.business_objects if item.id == "customer")
+    order_count = next(item for item in customer.attributes if item.name == "客户订单数")
+
+    assert order_count.pending_confirmation is True
+
+
+def test_customer_lifetime_value_is_marked_pending_confirmation():
+    model = load_semantic_model(MODEL_PATH)
+    customer = next(item for item in model.business_objects if item.id == "customer")
+    lifetime_value = next(item for item in customer.attributes if item.name == "客户生命周期价值")
+
+    assert lifetime_value.pending_confirmation is True
+
+
 def test_published_model_marks_raw_to_staging_lineage_confirmed():
     registry = SemanticModelRegistry()
     registry.publish(load_semantic_model(MODEL_PATH))
