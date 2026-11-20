@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.query import DataSource, Filter, OrderBy, Query, execute_query, load_catalog
+from app.query import DataSource, Filter, OrderBy, Query, execute_query, load_catalog, question_catalog
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +43,14 @@ def test_orders_catalog_is_projected_from_the_published_semantic_model():
     ]
     assert "customers" not in json.dumps(catalog, ensure_ascii=False)
     assert "raw_orders" not in json.dumps(catalog, ensure_ascii=False)
+
+
+def test_orders_dimension_question_catalog_does_not_require_a_time_dimension():
+    catalog = question_catalog(ROOT, "orders", "订单状态")
+
+    assert catalog["metrics"] == {}
+    assert set(catalog["dimensions"]) == {"status"}
+    assert catalog["models"]["order_mart"]["date_column"] is None
 
 
 def test_orders_canonical_count_and_legacy_alias_share_legacy_result_contract(jaffle_shop_path: Path):

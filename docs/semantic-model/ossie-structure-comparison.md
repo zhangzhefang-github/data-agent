@@ -140,9 +140,9 @@ Jaffle Shop 的 `customer.candidate_key` 是单个字符串 `customer_id`。Ossi
 
 本体关系的语义是集合，链接不含 null，并且用 `verbalizes` 给出读法。这是概念层结构。核心 `relationship` 的语义是数据集之间的外键式连接。两边文件分别是 `external/ossie/ontology/ontology.md` 的 Relationships，和 `external/ossie/core-spec/spec.md` 的 Relationships。本仓库的业务关系更接近前者的位置，数据集关系更接近后者；字段集合仍然不同。
 
-### 授权空间
+### 主题空间
 
-本仓库没有名为 Space 或 AuthorizationSpace 的类型。和“谁可以查、哪条关系可以用于计划”有关的结构散落在下面这些字段和术语里。
+主题空间的类型是 `SpaceDefinition`，它不在 `SemanticModel` 里面。和“谁可以查、哪条关系可以用于计划”有关的结构还包括下面这些字段和术语。
 
 | 结构 | 本仓库 | 本仓库文件 | Ossie | Ossie 文件 |
 | --- | --- | --- | --- | --- |
@@ -212,4 +212,4 @@ Ossie 里没有找到授权空间，也没有找到与 `exposure_policy`、`publ
 
 4. 路线图与本体规范的完成状态。`external/ossie/ROADMAP.md` 仍把显式实体建模、跨域建模和本体层列为交付项。`external/ossie/ontology/ontology.md` 与 `external/ossie/core-spec/spec_layers.md` 已经把 Layer 4 定义为当前规范，版本 `0.3.0.dev0`。不能从这两处判断哪些本体字段被视为已稳定。
 
-5. 本仓库“授权空间”没有单一类型可与 Ossie 的某个未来访问控制对象对齐。`GLOSSARY.md` 的主题空间、`models.py` 的暴露和发布标志、`canonical-semantic-model-v1.md` 的 `confirmed` 关系，各自覆盖不同范围。Ossie 侧只确认了路线图中的 access control 一句，以及 Layer 2 对行级、列级安全的排除。不能确认 Ossie 以后的访问控制会落在模型字段、目录服务，还是查询接口。
+5. 本仓库的主题空间、暴露和发布标志、以及 `confirmed` 关系，各自覆盖不同范围，不能合成一个 Ossie 访问控制对象。`GLOSSARY.md` 定义主题空间，`SpaceDefinition` 承载它；`models.py` 有暴露和发布标志；`canonical-semantic-model-v1.md` 要求点名 `confirmed` 关系。Ossie 侧只确认了路线图中的 access control 一句，以及 Layer 2 对行级、列级安全的排除。不能确认 Ossie 以后的访问控制会落在模型字段、目录服务，还是查询接口。
