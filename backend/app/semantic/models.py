@@ -160,6 +160,8 @@ class Metric(BaseModel):
     additive: bool = True
     unit: str | None = None
     synonyms: list[str] = Field(default_factory=list)
+    # 待确认口径还不能进入主题空间的可问指标。
+    pending_confirmation: bool = False
     published: bool = False
 
     @model_validator(mode="before")

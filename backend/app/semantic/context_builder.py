@@ -146,6 +146,16 @@ def build_semantic_context(
 
     metrics_by_id = {metric.id: metric for metric in model.metrics}
     dimensions_by_id = {dimension.id: dimension for dimension in model.dimensions}
+    # 待确认指标留在模型里，但不进入主题空间的可问指标。
+    space = space.model_copy(
+        update={
+            "metric_ids": [
+                identifier
+                for identifier in space.metric_ids
+                if not metrics_by_id[identifier].pending_confirmation
+            ]
+        }
+    )
     selected_metric_ids, selected_dimension_ids = _select_terms(
         space, metrics_by_id, dimensions_by_id, user_question
     )

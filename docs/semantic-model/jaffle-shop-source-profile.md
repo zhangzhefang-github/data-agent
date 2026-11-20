@@ -35,7 +35,7 @@ Customer → Order 与 Order → Payment 仍是 `proposed` 业务关系。数据
 - `raw_orders` → `stg_orders` 将 `id` 改名为 `order_id`，将 `user_id` 改名为 `customer_id`。
 - `raw_payments` → `stg_payments` 将 `id` 改名为 `payment_id`，并将 `amount` 转换为 `amount / 100`。
 
-订单日期范围为 2018-01-01 至 2018-04-09。状态的快照计数为 completed 67、placed 13、return_pending 2、returned 4、shipped 13。按支付方式汇总后，订单上的四类金额与 `stg_payments` 一致：credit_card 871、coupon 185、bank_transfer 411、gift_card 205，合计 1672。同一订单内把同一支付方式的支付加总后，这四类金额也与订单对应列相符。单笔支付明细并不逐行等于订单上的对应金额：4 笔订单各有两笔信用卡支付，这 8 行的单笔金额与订单信用卡金额不同。
+订单日期范围为 2018-01-01 至 2018-04-09。状态的快照计数为 completed 67、placed 13、return_pending 2、returned 4、shipped 13。按支付方式汇总后，订单上的四类金额与 `stg_payments` 一致：credit_card 871、coupon 185、bank_transfer 411、gift_card 205，合计 1672。
 
 直接关联订单与支付明细时，99 笔订单扩展为 113 行，订单金额从 1672 重复累计为 2083。先按 `order_id` 聚合支付后，关联维持 99 行，订单与支付金额均为 1672。该结果是订单与支付分析中的 Fanout 验收基线。
 
