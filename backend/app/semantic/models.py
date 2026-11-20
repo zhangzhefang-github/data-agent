@@ -74,6 +74,13 @@ class BusinessRelationship(BaseModel):
     description: str = ""
 
 
+class DatasetLineage(BaseModel):
+    id: str
+    source_dataset_id: str
+    target_dataset_id: str
+    verification_status: VerificationStatus
+
+
 class DatasetRelationship(BaseModel):
     id: str
     source_dataset_id: str
@@ -164,6 +171,7 @@ class SemanticModel(BaseModel):
     business_objects: list[BusinessObject]
     business_relationships: list[BusinessRelationship]
     datasets: list[Dataset]
+    dataset_lineage: list[DatasetLineage] = Field(default_factory=list)
     dataset_relationships: list[DatasetRelationship]
     metrics: list[Metric]
     dimensions: list[Dimension]
