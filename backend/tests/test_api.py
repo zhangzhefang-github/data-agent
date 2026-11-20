@@ -203,3 +203,52 @@ def test_terms_use_catalog_synonyms(monkeypatch, tmp_path):
     with TestClient(app) as client:
         client.post("/api/chat/stream", json={"message": "各地区净销售额"})
     assert matches == [{"sales_amount": "销售额", "city": "城市"}]
+
+
+def test_orders_space_normalizes_canonical_query_ids_before_saving_history(monkeypatch, tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from agents.tool_context import ToolContext
+    from app import main
+    from app.query import load_catalog
+
+    monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
+    monkeypatch.setattr(main, "CATALOG", load_catalog(main.ROOT, "orders"))
+    submitted = []
+
+    def fake_execute(path, plan, today, catalog=None, source=None):
+        submitted.append(plan.model_dump(mode="json"))
+        return {"columns": ["status", "order_rows"], "rows": [["completed", 67]], "sql": 'SELECT COUNT(*) AS "order_rows"', "source": "test", "elapsed_ms": 1}
+
+    class Run:
+        def __init__(self, agent):
+            self.agent = agent
+
+        async def stream_events(self):
+            tool = next(tool for tool in self.agent.tools if tool.name == "execute_semantic_query")
+            await tool.on_invoke_tool(
+                ToolContext(None, tool_name=tool.name, tool_call_id="1", tool_arguments="{}"),
+                json.dumps({"plan": {
+                    "metrics": ["orders.order_count"],
+                    "dimensions": ["status"],
+                    "order_by": {"field": "orders.order_count", "direction": "desc"},
+                }}),
+            )
+            yield SimpleNamespace(type="raw_response_event", data=SimpleNamespace(type="response.output_text.delta", delta="完成"))
+
+    monkeypatch.setattr(main, "execute_query", fake_execute)
+    monkeypatch.setattr(main.Runner, "run_streamed", lambda agent, *args, **kwargs: Run(agent))
+    with TestClient(app) as client:
+        response = client.post("/api/chat/stream", json={"message": "订单笔数"})
+        conversation = json.loads(next(part for part in response.text.split("\n\n") if part.startswith("event: conversation")).split("data: ", 1)[1])
+        detail = client.get(f"/api/conversations/{conversation['conversation_id']}").json()
+        space = client.get("/api/spaces").json()[0]
+
+    assert submitted[0]["metrics"] == ["order_rows"]
+    assert submitted[0]["order_by"] == {"field": "order_rows", "direction": "desc"}
+    assert detail["last_query"]["metrics"] == ["order_rows"]
+    assert detail["last_query"]["order_by"] == {"field": "order_rows", "direction": "desc"}
+    assert set(space["metrics"]) == {
+        "order_amount", "order_rows", "credit_card_amount", "coupon_amount", "bank_transfer_amount", "gift_card_amount",
+    }

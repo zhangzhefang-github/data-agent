@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, space_instructions
+from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
     set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
@@ -166,6 +166,7 @@ async def chat(request: ChatRequest):
                 plan = plan.model_copy(update={"time_range": TimeRange(start=last_year(previous_range.start), end=last_year(previous_range.end))})
             elif plan.time_range is None:
                 plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
+            plan = normalize_query(plan, CATALOG)
             source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
             data = execute_query(DATABASE, plan, today, CATALOG, source=source)
             if source.engine == "sqlite" and EXTERNAL_SQLITE_PATH:
