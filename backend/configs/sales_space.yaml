@@ -14,7 +14,30 @@ space:
       expression: SUM(sales_amount)
       description: 人民币净销售额
       synonyms: [销售金额, 净销售额]
+    order_count:
+      name: 订单量
+      model: sales_summary
+      expression: SUM(order_count)
+      description: 有效订单数
+    average_order_value:
+      name: 客单价
+      model: sales_summary
+      numerator: sales_amount
+      denominator: order_count
+      description: 汇总销售额除以汇总订单量
   dimensions:
+    stat_date:
+      name: 业务日期
+      model: sales_summary
+      column: stat_date
+    store:
+      name: 门店
+      model: sales_summary
+      column: store_id
+    product:
+      name: 产品
+      model: sales_summary
+      column: product
     city:
       name: 城市
       model: sales_summary
