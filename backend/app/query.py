@@ -62,14 +62,21 @@ def load_catalog(root: Path, space_name: str) -> dict:
     return yaml.safe_load(path.read_text())['space']
 
 
-def _orders_semantic_context(root: Path) -> SemanticContext:
+def question_catalog(root: Path, space_name: str, question: str) -> dict:
+    """Return the catalog an agent may see for one question inside a Space."""
+    if space_name == 'orders':
+        return catalog_from_semantic_context(_orders_semantic_context(root, question))
+    return load_catalog(root, space_name)
+
+
+def _orders_semantic_context(root: Path, question: str | None = None) -> SemanticContext:
     model_path = root / 'backend' / 'configs' / 'semantic' / 'jaffle_shop.yaml'
     spaces_path = root / 'backend' / 'configs' / 'semantic' / 'spaces.yaml'
     model = load_semantic_model(model_path)
     registry = SemanticModelRegistry()
     registry.publish(model)
     published = registry.get(model.id, model.version)
-    return build_semantic_context('sales', 'orders', model=published, spaces_path=spaces_path)
+    return build_semantic_context('sales', 'orders', question, model=published, spaces_path=spaces_path)
 
 
 def physical_value(dimension: dict, value: str) -> str:

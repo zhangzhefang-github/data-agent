@@ -23,6 +23,7 @@ def test_orders_catalog_is_projected_from_the_published_semantic_model():
     catalog = load_catalog(ROOT, "orders")
 
     assert catalog["id"] == "orders"
+    assert catalog["name"] == "订单主题空间"
     assert set(catalog["metrics"]) == {
         "order_amount",
         "order_rows",

@@ -99,6 +99,48 @@ def test_default_context_rejects_a_model_that_cannot_be_published(tmp_path: Path
         build_semantic_context("sales", "orders", model_path=model_path, spaces_path=spaces_path)
 
 
+def test_context_omits_dimensions_that_are_not_user_visible(tmp_path: Path):
+    spaces_path = tmp_path / "spaces.yaml"
+    spaces_path.write_text(
+        SPACES_PATH.read_text().replace(
+            "      - orders.status\n",
+            "      - orders.status\n      - customers.first_order\n",
+        ).replace(
+            "      - order_mart\n",
+            "      - order_mart\n      - customer_mart\n",
+        )
+    )
+
+    context = build_semantic_context(
+        "sales", "orders", model=load_semantic_model(MODEL_PATH), spaces_path=spaces_path
+    )
+
+    assert [dimension.id for dimension in context.business.dimensions] == [
+        "orders.order_date",
+        "orders.status",
+    ]
+
+
+def test_context_omits_datasets_that_are_not_approved_for_exposure(tmp_path: Path):
+    model = load_semantic_model(MODEL_PATH)
+    next(item for item in model.dimensions if item.id == "customers.first_order").user_visible = True
+    spaces_path = tmp_path / "spaces.yaml"
+    spaces_path.write_text(
+        SPACES_PATH.read_text().replace(
+            "      - orders.status\n",
+            "      - orders.status\n      - customers.first_order\n",
+        ).replace(
+            "      - order_mart\n",
+            "      - order_mart\n      - customer_mart\n",
+        )
+    )
+
+    context = build_semantic_context("sales", "orders", model=model, spaces_path=spaces_path)
+
+    assert "customers.first_order" not in [dimension.id for dimension in context.business.dimensions]
+    assert "customer_mart" not in [dataset.id for dataset in context.sql.datasets]
+
+
 def test_orders_context_keeps_dimension_only_match_from_adding_every_metric():
     context = build_semantic_context(
         "sales", "orders", "订单状态", model=load_semantic_model(MODEL_PATH), spaces_path=SPACES_PATH
