@@ -23,6 +23,14 @@ spaces:
         已完成: completed
         退货中: return_pending
         已退货: returned
+    calendar:
+      timezone: Asia/Shanghai
+      fiscal_year_start_month: 1
+      quarters:
+        - 第一季度是 1–3 月
+        - 第二季度是 4–6 月
+        - 第三季度是 7–9 月
+        - 第四季度是 10–12 月
     filter_rules:
       - 订单日期以 Asia/Shanghai 业务日解释。
       - 订单状态仅使用 Space 授权的状态字典。

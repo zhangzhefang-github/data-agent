@@ -180,7 +180,7 @@ dimensions:
 metrics:
   - id: orders.order_amount
     name: 订单金额
-    definition: "订单主题空间中 amount 的合计"
+    definition: "订单金额是 amount 的合计。四种支付金额之和等于 amount，不要再与 amount 相加。"
     expression: {kind: sum, field_id: amount}
     source_dataset_id: order_mart
     base_grain: [order_id]

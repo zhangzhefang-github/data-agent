@@ -16,6 +16,12 @@ from app.semantic.registry import SemanticModelRegistry
 _QUERY_RUNTIME_EXPRESSION_KINDS = {"sum", "count"}
 
 
+class SpaceCalendar(BaseModel):
+    timezone: str
+    fiscal_year_start_month: int = 1
+    quarters: list[str] = Field(default_factory=list)
+
+
 class SpaceDefinition(BaseModel):
     id: str
     domain_id: str
@@ -26,6 +32,7 @@ class SpaceDefinition(BaseModel):
     relationship_ids: list[str] = Field(default_factory=list)
     metric_aliases: dict[str, str] = Field(default_factory=dict)
     dimension_values: dict[str, dict[str, str]] = Field(default_factory=dict)
+    calendar: SpaceCalendar | None = None
     filter_rules: list[str] = Field(default_factory=list)
     sql_examples: list[str] = Field(default_factory=list)
 
@@ -90,6 +97,7 @@ class BusinessSemanticContext(BaseModel):
     metrics: list[ContextMetric]
     dimensions: list[ContextDimension]
     metric_aliases: dict[str, str]
+    calendar: SpaceCalendar | None = None
     filter_rules: list[str]
     sql_examples: list[str]
 
@@ -199,6 +207,7 @@ def build_semantic_context(
             metrics=[_context_metric(metric) for metric in selected_metrics],
             dimensions=[_context_dimension(dimension, space.dimension_values) for dimension in selected_dimensions],
             metric_aliases={alias: target for alias, target in space.metric_aliases.items() if target in selected_metric_ids},
+            calendar=space.calendar,
             filter_rules=space.filter_rules,
             sql_examples=space.sql_examples,
         ),

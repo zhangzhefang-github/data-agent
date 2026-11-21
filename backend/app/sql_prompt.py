@@ -38,7 +38,12 @@ def render_direct_sql_prompt(root: Path, database: dict) -> str:
             expression = f"SUM({metric.field_id})"
         else:
             continue
-        metrics.append({"alias": alias, "name": metric.name, "expression": f"{expression} AS {alias}"})
+        metrics.append({
+            "alias": alias,
+            "name": metric.name,
+            "expression": f"{expression} AS {alias}",
+            "definition": metric.definition,
+        })
     values = [
         {"dimension": dimension.name, "values": dimension.allowed_values}
         for dimension in context.business.dimensions
@@ -50,9 +55,11 @@ def render_direct_sql_prompt(root: Path, database: dict) -> str:
         f"方言版本：{database['version']}\n"
         f"方言规则：\n{rules}\n"
         f"经典示例（只说明写法，其中的表不一定已授权）：\n{example}\n"
+        f"业务对象：{[{'id': item.id, 'name': item.name} for item in context.business.objects]}\n"
         f"本次授权的表：{database['tables']}\n"
-        f"授权关系：{[item.id for item in context.sql.relationships]}\n"
+        f"授权关系：{[{'id': item.id, 'source': item.source_dataset_id, 'target': item.target_dataset_id, 'cardinality': item.cardinality, 'fanout_risk': item.fanout_risk} for item in context.sql.relationships]}\n"
         f"授权指标：{metrics}\n"
+        f"日历：{None if context.business.calendar is None else context.business.calendar.model_dump()}\n"
         f"状态字典：{values}\n"
         f"过滤规则：{context.business.filter_rules}"
     )

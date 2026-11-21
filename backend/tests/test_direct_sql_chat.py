@@ -75,8 +75,13 @@ def order_chat(monkeypatch, tmp_path):
             assert "weekly_sales" in prompt
             assert "本次授权的表：" in prompt
             authorized = prompt.split("本次授权的表：", 1)[1].split("授权关系：", 1)[0]
+            objects = prompt.split("业务对象：", 1)[1].split("本次授权的表：", 1)[0]
             assert "main.orders" in authorized
             assert "customer_id" not in authorized
+            assert "'id': 'order'" in objects
+            assert "customer" not in objects
+            assert "第一季度是 1–3 月" in prompt
+            assert "不要再与 amount 相加" in prompt
             return Run()
 
         tool = None
