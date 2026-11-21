@@ -26,6 +26,10 @@ class SqlCorrection(ValueError):
     """The model can correct the SQL using a bounded, public diagnostic."""
 
 
+class SqlTimeout(TimeoutError):
+    """DuckDB interrupted execution when the query reached its time limit."""
+
+
 def _connect(path: Path):
     return duckdb.connect(str(path), read_only=True, config={"enable_external_access": "false"})
 
@@ -35,6 +39,8 @@ def _fetch(db, sql: str):
     timer.start()
     try:
         return db.execute(sql).fetchmany(MAX_ROWS)
+    except duckdb.InterruptException as exc:
+        raise SqlTimeout("订单查询超时") from exc
     finally:
         timer.cancel()
         timer.join()

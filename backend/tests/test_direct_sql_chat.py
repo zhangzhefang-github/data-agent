@@ -155,6 +155,49 @@ def test_rows_are_capped_before_returning_results(order_chat):
     assert events["result"]["rows"][0] == ["2010-01-01", 1]
 
 
+def test_order_query_timeout_preserves_last_success(order_chat, monkeypatch):
+    connect = duckdb.connect
+
+    class InterruptingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __enter__(self):
+            self.connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.connection.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def execute(self, sql):
+            if "2019-01-01" in sql:
+                raise duckdb.InterruptException("driver diagnostic")
+            return self.connection.execute(sql)
+
+    def interrupting_connect(*args, **kwargs):
+        return InterruptingConnection(connect(*args, **kwargs))
+
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        assert first["result"]["rows"] == [[3, 35.0]]
+        conversation_id = first["conversation"]["conversation_id"]
+        route = f"/api/conversations/{conversation_id}"
+        last_query = client.get(route).json()["last_query"]
+        monkeypatch.setattr(duckdb, "connect", interrupting_connect)
+        timed_out, _ = order_chat(
+            client, [TOTALS + " WHERE order_date = '2019-01-01'", HISTORICAL],
+            conversation_id=conversation_id,
+        )
+        assert client.get(route).json()["last_query"] == last_query
+
+    assert timed_out["error"] == {"code": "query_timeout", "message": "订单查询超时"}
+    assert timed_out["done"]["status"] == "failed"
+    assert "result" not in timed_out
+
+
 def test_direct_follow_up_keeps_last_success_after_failure_and_shifts_leap_day(order_chat):
     sql = (
         "SELECT COUNT(*) AS order_rows FROM orders "

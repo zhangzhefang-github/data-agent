@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.direct_sql import SqlCorrection, SqlRejected, execute_order_sql, order_database_context, prior_order_sql
+from app.direct_sql import SqlCorrection, SqlRejected, SqlTimeout, execute_order_sql, order_database_context, prior_order_sql
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
@@ -272,6 +272,9 @@ async def chat(request: ChatRequest):
             yield event("done", {"status": "completed"})
         except asyncio.CancelledError:
             raise
+        except SqlTimeout as exc:
+            yield event("error", {"message": str(exc), "code": "query_timeout"})
+            yield event("done", {"status": "failed"})
         except Exception as exc:
             logger.error("Agent request failed (%s)", type(exc).__name__)
             yield event("error", {"message": query_error or "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
