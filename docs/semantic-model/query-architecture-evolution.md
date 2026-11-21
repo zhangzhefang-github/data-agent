@@ -1,24 +1,35 @@
 # 查询架构演进
 
-[ADR 0001](../adr/0001-structured-sales-query-boundary.md) 保留结构化 Query IR 与确定性 Compiler 作为当前执行路径。[ADR 0002](../adr/0002-canonical-semantic-model.md) 将业务口径、授权和映射提升到 Canonical Semantic Model。
+[ADR 0002](../adr/0002-canonical-semantic-model.md) 由规范语义模型定义订单业务口径、授权和物理映射。[ADR 0003](../adr/0003-direct-sql-duckdb-first.md) 将订单主题空间的 DuckDB 默认查询路径切换到 Direct SQL。销售主题空间的结构化路径由 [ADR 0001](../adr/0001-structured-sales-query-boundary.md) 定义。
 
-| 路径 | 流程 | Phase 1 状态 |
+| 路径 | 流程 | Phase 1 适用范围 |
 | --- | --- | --- |
-| 结构化查询 | 问题 → Semantic Context → Query IR → 语义校验 → 确定性 Compiler → 只读执行 | 已接入订单 Space |
-| 灵活 SQL | 问题 → Semantic Context → LLM SQL → SQL AST 校验 → 语义校验 → 执行保护 | 仅定义边界 |
+| Direct SQL | 问题 → 语义和数据库上下文 → Agent 生成 SQL → SQL AST 校验 → DuckDB 只读执行 | 订单主题空间连接 DuckDB 时的默认路径 |
+| 结构化查询 | 问题 → 语义上下文 → Query IR → 语义校验 → Compiler → 只读执行 | 销售主题空间及使用其他数据库的订单查询 |
 
-两条路径共享同一份模型、指标、维度、物理映射、关系证据和 Space 授权。Query IR 不再承载业务定义，也不是唯一查询表达方式。
+订单主题空间的两种执行路径使用同一份规范语义模型和授权。授权范围包括六个订单指标、订单日期和订单状态。业务日期按 Asia/Shanghai 解释，未指定日期时查询今年截至今天。
 
 ## 订单路径兼容
 
-订单 Space 的 Context 生成兼容 Query IR 目录。它只投影已经授权的六个订单指标、订单日期和订单状态。当前 Compiler 使用该投影的一数据集子集，并继续生成对 `orders` 表的参数化只读 SQL。
+订单笔数的规范 ID 为 `orders.order_count`，结果列和 SQL 展示别名保留 `order_rows`。历史查询的指标和排序字段可用规范 ID 或兼容 ID。状态筛选支持授权字典中的中文业务值和物理值，Direct SQL 结果以中文显示订单状态。
 
-规范 ID `orders.order_count` 与旧输入 ID `order_rows` 都可作为指标和排序字段。适配层在校验、执行和保存会话前归一到 `order_rows`，因此重复传入两个 ID 会被拒绝。结果列、展示 SQL 别名和历史 Query IR 一直保留 `order_rows`。销售 Space 的 `order_count` 仍表示有效订单量，未通过此适配层改变。
+旧会话直接展示已保存的结果。续问时，兼容层读取旧 Query IR 的条件并按当前主题空间授权重验。Direct SQL 会话保存最近一次成功执行的 SQL。「去年同期」将已保存的日期向前移一年，保留原筛选、指标和分组，随后经过同一校验入口执行。2 月 29 日在上一年没有对应日期时改用 2 月 28 日。查询失败时保留此前成功的会话上下文。
 
-固定的 2026 业务日期下，订单 Space 的默认「今年」查询为空。2018-01-01 至 2018-04-09 的真实数据按状态共 99 笔订单、金额 1672。状态过滤接受 Space 定义的中文业务值和物理值，并将多个等值状态过滤编译为同一字段的 `IN` 条件。日期过滤与时间范围取交集。
+## Direct SQL 的执行边界
 
-## 灵活 SQL 的确定性边界
+Agent 取得实际 DuckDB 版本、获准的表和字段，以及已执行验证的 SQL 示例。SQLGlot 校验单条 SELECT，只允许访问 `main.orders` 和获准字段。程序校验指标表达式、日期和状态筛选、分组及排序，并拒绝跨表访问和外部数据源。
 
-未来 SQL 路径使用 SQLGlot 限制单条只读 SELECT，检查方言、表和字段白名单，拒绝写入、DDL 与多语句。语义校验还须验证已定义指标、维度映射、授权的可信 JOIN、路径歧义、粒度与 Fanout。执行层负责只读连接、超时、返回行数、用户权限与数据范围。
+DuckDB 以只读方式连接，关闭外部访问，执行限时 5 秒，最多返回 500 行。可修复的 SQL 错误最多重试两次，每次重新校验。权限拒绝会结束查询。跨表 JOIN 与 Fanout 校验留待对应业务能力上线时验收。
 
-Phase 1 没有实现 LLM SQL 生成、完整 AST 语义校验或自我修正循环。
+## 验证
+
+在仓库根目录运行以下命令。
+
+```sh
+(cd backend && python -m pytest -q tests/test_direct_sql_chat.py)
+(cd backend && python -m app.evaluation.runner)
+```
+
+订单 Direct SQL 回归通过现有聊天接口运行，用替换的模型 Runner 提交 SQL，由真实的 DuckDB 测试数据库执行。用例覆盖订单笔数、金额、空结果、权限拒绝、重试和旧会话续问。销售 Golden Dataset 继续验证结构化查询路径。
+
+本地 Jaffle Shop 的只读复核使用 2018-01-01 至 2018-04-09，预期为 99 笔订单、金额 1672。该复核验证数据库结果。实际模型能否从自然语言生成相应 SQL 需要另做端到端验证。

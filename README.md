@@ -50,7 +50,7 @@ npm --prefix frontend run build
 
 模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。追踪导出默认关闭。需要 OpenAI Tracing 时，单独设置 `OPENAI_TRACING_API_KEY` 为有效的 OpenAI 密钥。模型服务密钥独立保存在 `OPENAI_API_KEY`。启用追踪时，应用关闭 SDK 中的敏感内容采集。
 
-Golden Dataset 使用固定的 2026-06-01 业务日期和独立 SQLite 测试数据，运行以下命令可验证 11 条标准查询。输出包含每条实际 Query IR、SQL、执行状态、结果及失败环节。
+销售 Golden Dataset 使用固定的 2026-06-01 业务日期和独立 SQLite 测试数据，运行以下命令可验证 11 条标准查询。输出包含每条实际 Query IR、SQL、执行状态、结果及失败环节。订单主题空间的 DuckDB Direct SQL 回归入口和验收范围见[查询架构演进](docs/semantic-model/query-architecture-evolution.md#验证)。
 
 ```sh
 PYTHONPATH=backend python -m app.evaluation.runner
