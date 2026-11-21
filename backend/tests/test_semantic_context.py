@@ -77,14 +77,16 @@ def test_orders_context_selects_authorized_terms_and_serializes_without_sensitiv
         "orders.status",
     ]
     assert [dataset.id for dataset in context.sql.datasets] == ["order_mart"]
-    assert context.sql.relationships == []
+    assert [item.id for item in context.sql.relationships] == ["order_mart_customer_mart"]
+    assert context.sql.relationships[0].fanout_risk is False
     assert context.business.metric_aliases == {"order_rows": "orders.order_count"}
     status = next(dimension for dimension in context.business.dimensions if dimension.id == "orders.status")
     assert status.allowed_values == {"已下单": "placed", "已发货": "shipped", "已完成": "completed", "退货中": "return_pending", "已退货": "returned"}
 
     serialized = context.model_dump_json()
-    for restricted in ("first_name", "last_name", "customer_mart", "payment_staging", "raw_orders", "jaffle_duckdb"):
+    for restricted in ("first_name", "last_name", "payment_staging", "raw_orders", "jaffle_duckdb"):
         assert restricted not in serialized
+    assert "order_to_payment" not in serialized
 
 
 def test_orders_context_without_matches_returns_the_authorized_catalog_in_stable_order():
@@ -127,7 +129,7 @@ def test_orders_context_serialization_omits_technical_keys_and_unapproved_fields
     }
     serialized = context.model_dump_json()
     assert "order_id" not in serialized
-    assert "customer_id" not in serialized
+    assert payload["sql"]["relationships"][0]["source_fields"] == ["customer_id"]
     assert context.business.metrics[0].base_grain == ["order_id"]
 
 

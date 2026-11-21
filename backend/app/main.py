@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from app.demo import initialize
 from app import conversations
 from app.direct_sql import SqlCorrection, SqlRejected, SqlTimeout, execute_order_sql, order_database_context, prior_order_sql
-from app.sql_prompt import authorized_tables, render_direct_sql_prompt
+from app.sql_prompt import authorized_joins, authorized_tables, render_direct_sql_prompt
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
@@ -135,12 +135,14 @@ async def chat(request: ChatRequest):
         source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
         direct_sql = CATALOG["id"] == "orders" and source.engine == "duckdb"
         business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        join_keys = authorized_joins(ROOT) if direct_sql else set()
         previous_sql = None
         if direct_sql:
             if context and context.get("mode") == "orders_duckdb" and isinstance(context.get("sql"), str):
                 try:
                     previous_sql = prior_order_sql(
-                        context["sql"], CATALOG, business_today, shift=last_year if is_previous_period else None,
+                        context["sql"], CATALOG, business_today,
+                        shift=last_year if is_previous_period else None, joins=join_keys,
                     )
                 except ValueError:
                     context = None
@@ -210,7 +212,7 @@ async def chat(request: ChatRequest):
                 candidate = previous_sql if is_previous_period and previous_sql else sql
                 try:
                     data = await asyncio.to_thread(
-                        execute_order_sql, Path(source.location), candidate, CATALOG, business_today,
+                        execute_order_sql, Path(source.location), candidate, CATALOG, business_today, join_keys,
                     )
                 except SqlCorrection as exc:
                     if attempts < 3 and not is_previous_period:

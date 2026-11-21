@@ -41,7 +41,8 @@ def order_chat(monkeypatch, tmp_path):
             SELECT DATE '2010-01-01' + CAST(i AS INTEGER), 'completed', 1, 1, 0, 0, 0, 20
             FROM range(600) AS days(i)
         """)
-        db.execute("CREATE TABLE customers (name VARCHAR)")
+        db.execute("CREATE TABLE customers (customer_id INTEGER)")
+        db.execute("INSERT INTO customers VALUES (12), (13), (14), (15), (16), (17), (18), (19), (20)")
 
     class BusinessClock(datetime):
         @classmethod
@@ -78,6 +79,11 @@ def order_chat(monkeypatch, tmp_path):
             objects = prompt.split("业务对象：", 1)[1].split("本次授权的表：", 1)[0]
             assert "main.orders" in authorized
             assert "customer_id" not in authorized
+            relations = prompt.split("授权关系：", 1)[1].split("授权指标：", 1)[0]
+            assert "order_mart_customer_mart" in relations
+            assert "'source': 'orders'" in relations
+            assert "'target': 'customers'" in relations
+            assert "order_to_payment" not in relations
             assert "'id': 'order'" in objects
             assert "customer" not in objects
             assert "第一季度是 1–3 月" in prompt
@@ -99,8 +105,15 @@ def order_chat(monkeypatch, tmp_path):
     return ask
 
 
+JOINED = (
+    "SELECT COUNT(*) AS order_rows FROM orders "
+    "JOIN customers ON orders.customer_id = customers.customer_id"
+)
+
+
 @pytest.mark.parametrize(("sql", "columns", "rows"), [
     (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]]),
+    (JOINED, ["order_rows"], [[608]]),
     (TOTALS, ["order_rows", "order_amount"], [[608, 940.0]]),
     (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], []),
     (
@@ -126,6 +139,8 @@ def test_order_chat_golden_results(order_chat, sql, columns, rows):
     "DELETE FROM orders",
     "SELECT COUNT(*) AS order_rows FROM customers",
     "SELECT COUNT(*) AS order_rows FROM orders JOIN customers ON TRUE",
+    "SELECT COUNT(*) AS order_rows FROM orders LEFT JOIN customers ON orders.customer_id = customers.customer_id",
+    "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id",
     "SELECT COUNT(*) AS order_rows FROM orders WHERE customer_id = 10",
     "SELECT COUNT(*) AS order_rows FROM range(10)",
 ])

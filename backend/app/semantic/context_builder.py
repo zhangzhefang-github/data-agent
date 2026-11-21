@@ -191,9 +191,10 @@ def build_semantic_context(
         relationship
         for relationship in model.dataset_relationships
         if relationship.id in space.relationship_ids
-        and relationship.verification_status == "confirmed"
-        and relationship.source_dataset_id in selected_dataset_ids
-        and relationship.target_dataset_id in selected_dataset_ids
+        and relationship.verification_status in {"confirmed", "profiled"}
+        and not relationship.fanout_risk
+        and relationship.source_dataset_id in space.dataset_ids
+        and relationship.target_dataset_id in space.dataset_ids
     ]
 
     return SemanticContext(

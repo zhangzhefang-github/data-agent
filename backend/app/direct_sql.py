@@ -126,7 +126,47 @@ def _filter_dates(node, dimensions, qualifier) -> list[exp.Literal]:
     return [_date_literal(value) for value in values]
 
 
-def _validate_order_sql(sql: str, catalog: dict, today: date):
+def _plain_table(table) -> bool:
+    return (isinstance(table, exp.Table) and isinstance(table.this, exp.Identifier)
+            and table.db.lower() in {"", "main"} and not table.catalog
+            and not any(value and key not in {"this", "db", "alias"} for key, value in table.args.items())
+            and not (table.args.get("alias") and table.args["alias"].columns))
+
+
+def _equijoin_columns(node) -> tuple[tuple[str, str], tuple[str, str]]:
+    if not isinstance(node, exp.EQ):
+        raise SqlRejected("关联必须使用已授权的等值条件")
+    columns = []
+    for side in (node.this, node.expression):
+        if not isinstance(side, exp.Column) or not side.table or side.args.get("db") or side.args.get("catalog"):
+            raise SqlRejected("关联必须使用已授权的等值条件")
+        columns.append((side.table.lower(), side.name.lower()))
+    return columns[0], columns[1]
+
+
+def _authorize_joins(joins, base: exp.Table, allowed: set[tuple[tuple[str, str], tuple[str, str]]]) -> None:
+    known = {base.name.lower()}
+    aliases = {(base.alias or base.name).lower(): base.name.lower()}
+    for join in joins:
+        if any(join.args.get(key) for key in ("side", "kind", "pivots")):
+            raise SqlRejected("只允许使用已授权关系的内连接")
+        target = join.this
+        if not _plain_table(target):
+            raise SqlRejected("查询包含未授权的表关联")
+        target.set("db", exp.to_identifier("main"))
+        name = target.name.lower()
+        left, right = _equijoin_columns(join.args.get("on"))
+        left_table = aliases.get(left[0], left[0])
+        right_table = aliases.get(right[0], right[0])
+        pair = tuple(sorted(((left_table, left[1]), (right_table, right[1]))))
+        other = right_table if name == left_table else left_table
+        if pair not in allowed or name not in {left_table, right_table} or name in known or other not in known:
+            raise SqlRejected("查询包含未授权的表关联")
+        known.add(name)
+        aliases[(target.alias or target.name).lower()] = name
+
+
+def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     if not sql.strip():
         raise SqlCorrection("请提交一条 DuckDB SELECT")
     if len(sql) > 12000:
@@ -138,19 +178,16 @@ def _validate_order_sql(sql: str, catalog: dict, today: date):
     if len(statements) != 1 or not isinstance(statements[0], exp.Select):
         raise SqlRejected("只允许单条 SELECT 查询")
     tree = statements[0]
-    supported = {"expressions", "from", "where", "group", "order", "limit", "having"}
+    supported = {"expressions", "from", "joins", "where", "group", "order", "limit", "having"}
     if any(value and key not in supported for key, value in tree.args.items()):
-        raise SqlRejected("订单查询只支持单表汇总")
+        raise SqlRejected("订单查询只支持单表汇总或已授权的等值关联")
     model = _order_table(catalog)
     source = tree.args.get("from")
     table = source.this if source else None
-    if (not isinstance(table, exp.Table) or not isinstance(table.this, exp.Identifier)
-            or table.name.lower() != model["table"]
-            or table.db.lower() not in {"", "main"} or table.catalog
-            or any(value and key not in {"this", "db", "alias"} for key, value in table.args.items())
-            or (table.args.get("alias") and table.args["alias"].columns)):
+    if not _plain_table(table) or table.name.lower() != model["table"]:
         raise SqlRejected("查询只允许访问已授权的订单表")
     table.set("db", exp.to_identifier("main"))
+    _authorize_joins(tree.args.get("joins") or [], table, set(joins))
     qualifier = (table.alias or table.name).lower()
     dimensions = {item["column"]: item for item in catalog["dimensions"].values()}
     metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
@@ -227,8 +264,8 @@ def _matches_metric(value, expected, qualifier):
     return isinstance(expected, exp.Sum) and _column(value.this, {expected.this.name}, qualifier)
 
 
-def execute_order_sql(path: Path, sql: str, catalog: dict, today: date) -> dict:
-    tree, columns, _ = _validate_order_sql(sql, catalog, today)
+def execute_order_sql(path: Path, sql: str, catalog: dict, today: date, joins=()) -> dict:
+    tree, columns, _ = _validate_order_sql(sql, catalog, today, joins)
     checked = tree.sql(dialect="duckdb", comments=False)
     start = monotonic()
     try:
@@ -254,8 +291,8 @@ def _json_rows(rows):
                else value for value in row]
 
 
-def prior_order_sql(sql: str, catalog: dict, today: date, *, shift=None) -> str:
-    tree, _, dates = _validate_order_sql(sql, catalog, today)
+def prior_order_sql(sql: str, catalog: dict, today: date, *, shift=None, joins=()) -> str:
+    tree, _, dates = _validate_order_sql(sql, catalog, today, joins)
     if shift:
         for literal in dates:
             literal.set("this", shift(date.fromisoformat(literal.this)).isoformat())
