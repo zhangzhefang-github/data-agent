@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
+from app.direct_sql import SqlCorrection, SqlRejected, execute_order_sql, order_database_context, prior_order_sql
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
@@ -130,6 +131,19 @@ async def chat(request: ChatRequest):
         answer = []
         context = conversation["last_query"] if conversation else None
         is_previous_period = bool(re.search(r"去年同期", request.message))
+        source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
+        direct_sql = CATALOG["id"] == "orders" and source.engine == "duckdb"
+        business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        previous_sql = None
+        if direct_sql and context:
+            try:
+                previous_sql = prior_order_sql(
+                    context, CATALOG, business_today, shift=last_year if is_previous_period else None,
+                )
+            except (ValueError, KeyError, TypeError):
+                context = None
+        elif context and context.get("mode") == "orders_duckdb":
+            context = None
 
         if is_previous_period and not context:
             message = f"请先提供需要对比的{CATALOG['name']}查询，再询问去年同期。"
@@ -168,7 +182,6 @@ async def chat(request: ChatRequest):
             elif plan.time_range is None:
                 plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
             plan = normalize_query(plan, CATALOG)
-            source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
             data = execute_query(DATABASE, plan, today, CATALOG, source=source)
             if source.engine == "sqlite" and EXTERNAL_SQLITE_PATH:
                 data['source'] = 'SQLite ADS'
@@ -176,24 +189,76 @@ async def chat(request: ChatRequest):
             query_data.append(plan.model_dump(mode="json"))
             return json.dumps(data, ensure_ascii=False)
 
-        agent = Agent(
-            name=f"{CATALOG['name']}助手",
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-            instructions=space_instructions(CATALOG),
-            tools=[get_semantic_catalog, resolve_business_terms, execute_semantic_query],
-        )
+        attempts = 0
+        query_error = None
+        query_lock = asyncio.Lock()
+
+        @function_tool(failure_error_function=None)
+        async def execute_direct_sql(sql: str) -> str:
+            """Execute one DuckDB SELECT submitted as SQL, with no surrounding Markdown."""
+            nonlocal attempts, query_error
+            async with query_lock:
+                if result_data:
+                    return json.dumps(result_data[-1], ensure_ascii=False)
+                if query_error or attempts >= 3:
+                    raise SqlRejected("查询已结束")
+                attempts += 1
+                candidate = previous_sql if is_previous_period and previous_sql else sql
+                try:
+                    data = await asyncio.to_thread(
+                        execute_order_sql, Path(source.location), candidate, CATALOG, business_today,
+                    )
+                except SqlCorrection as exc:
+                    if attempts < 3 and not is_previous_period:
+                        return json.dumps({"error": str(exc), "remaining_repairs": 3 - attempts}, ensure_ascii=False)
+                    query_error = "SQL 修复后仍无法执行"
+                    raise
+                except SqlRejected as exc:
+                    query_error = str(exc)
+                    raise
+                result_data.append(data)
+                query_data.append({"mode": "orders_duckdb", "sql": data["sql"]})
+                return json.dumps(data, ensure_ascii=False)
+
         yield event("conversation", {"conversation_id": conversation_id})
         yield event("status", {"status": "running"})
         try:
-            business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
             prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{request.message}"
-            if context:
+            tools = [get_semantic_catalog, resolve_business_terms, execute_semantic_query]
+            instructions = space_instructions(CATALOG)
+            run_options = {}
+            if direct_sql:
+                database = await asyncio.to_thread(order_database_context, Path(source.location), CATALOG)
+                instructions = (
+                    "你是订单主题空间助手。用 execute_direct_sql 提交一条 DuckDB SELECT，"
+                    "只访问 main.orders。指标按语义目录的表达式计算，并使用目录指标 ID 作为别名。"
+                    "维度使用原有列名。支持订单日期与订单状态字面量筛选、分组、排序和 LIMIT。"
+                    "无日期条件时服务默认今年截至今天。需要历史窗口时在 WHERE 写出正确日期。"
+                    "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
+                    "针对去年同期，调用工具提交服务提供的同期 SQL。"
+                )
+                tools = [get_semantic_catalog, resolve_business_terms, execute_direct_sql]
+                prompt += f"\n授权数据库上下文：{json.dumps(database, ensure_ascii=False)}"
+                if previous_sql:
+                    prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
+                run_options["max_turns"] = 8
+            elif context:
                 prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"
-            run = Runner.run_streamed(agent, prompt, run_config=RunConfig(trace_include_sensitive_data=False, tracing_disabled=not bool(os.getenv("OPENAI_TRACING_API_KEY"))))
+            agent = Agent(
+                name=f"{CATALOG['name']}助手", model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+                instructions=instructions, tools=tools,
+            )
+            run = Runner.run_streamed(
+                agent, prompt,
+                run_config=RunConfig(trace_include_sensitive_data=False, tracing_disabled=not bool(os.getenv("OPENAI_TRACING_API_KEY"))),
+                **run_options,
+            )
             async for item in run.stream_events():
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
                     answer.append(item.data.delta)
                     yield event("text", {"delta": item.data.delta})
+            if direct_sql and not result_data and attempts:
+                raise SqlCorrection("查询未返回已验证的结果")
             if result_data:
                 yield event("result", result_data[-1])
             message_id = conversations.add_message(
@@ -206,7 +271,7 @@ async def chat(request: ChatRequest):
             raise
         except Exception as exc:
             logger.error("Agent request failed (%s)", type(exc).__name__)
-            yield event("error", {"message": "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
+            yield event("error", {"message": query_error or "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
             yield event("done", {"status": "failed"})
 
     async def guarded_stream():

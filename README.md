@@ -42,6 +42,8 @@ npm --prefix frontend run build
 
 要读取 DuckDB 文件，在 `.env` 设置 `SALES_DUCKDB_PATH=/绝对路径/销售数据.duckdb`。服务以只读方式打开该文件，不会根据文件名猜测引擎。文件需包含当前主题空间声明的单表和字段。`SALES_SPACE=orders` 时使用订单主题空间，物理表为 `orders`，适合 Wren 的 `jaffle_shop.duckdb`。默认 `sales` 仍使用销售汇总表。`SALES_DATABASE_URL` 优先于 DuckDB，DuckDB 优先于 `SALES_SQLITE_PATH`。
 
+订单主题空间连接 DuckDB 时默认使用 Direct SQL。Agent 直接生成 SQL，后端根据规范语义模型检查获准的订单表、字段与指标口径，随后只读执行。历史会话中的「去年同期」追问可继承已保存的日期和筛选条件。[ADR 0003](docs/adr/0003-direct-sql-duckdb-first.md)
+
 要连接 PostgreSQL，在 `.env` 设置 `SALES_DATABASE_URL=postgresql://用户名:密码@主机:端口/数据库`，并为销售模型在 YAML 的 `models.sales_summary` 下添加 `schema`，同时配置允许的表、字段和指标表达式。使用仅授予该 schema 和表 SELECT 权限的数据库账户。服务使用只读事务、5 秒连接和语句超时、参数绑定及表字段白名单。三者同时设置时，PostgreSQL 优先，其次是 DuckDB，最后是 SQLite。重启后端生效。
 
 接入前需验证业务日期与物理字段类型、销售额和退款口径、订单粒度，以及订单量在每个启用维度上可加总。当前实现支持 PostgreSQL、DuckDB 与 SQLite，生产数据接入需要使用具体目标库完成连通性和口径验收。
