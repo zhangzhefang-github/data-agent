@@ -10,7 +10,7 @@ import duckdb
 from sqlglot import exp, parse, parse_one
 from sqlglot.errors import ParseError
 
-from app.query import physical_value, query_output_grain
+from app.query import physical_value
 
 MAX_ROWS = 500
 QUERY_TIMEOUT = 5
@@ -246,7 +246,6 @@ def execute_order_sql(path: Path, sql: str, catalog: dict, today: date) -> dict:
         "rows": [[status_names.get(value, value) if name == "status" else value
                   for name, value in zip(columns, row, strict=True)] for row in _json_rows(rows)],
         "sql": tree.sql(dialect="duckdb", pretty=True, comments=False),
-        "output_grain": query_output_grain([name for name in columns if name in catalog["dimensions"]], catalog),
         "source": "DuckDB",
         "elapsed_ms": round((monotonic() - start) * 1000, 2),
     }

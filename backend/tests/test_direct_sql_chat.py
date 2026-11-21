@@ -92,10 +92,10 @@ def order_chat(monkeypatch, tmp_path):
     return ask
 
 
-@pytest.mark.parametrize(("sql", "columns", "rows", "output_grain"), [
-    (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]], []),
-    (TOTALS, ["order_rows", "order_amount"], [[2, 30.0]], []),
-    (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], [], []),
+@pytest.mark.parametrize(("sql", "columns", "rows"), [
+    (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]]),
+    (TOTALS, ["order_rows", "order_amount"], [[2, 30.0]]),
+    (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], []),
     (
         "SELECT status, SUM(credit_card_amount) AS credit_card_amount, SUM(coupon_amount) AS coupon_amount, "
         "SUM(bank_transfer_amount) AS bank_transfer_amount, SUM(gift_card_amount) AS gift_card_amount "
@@ -103,16 +103,15 @@ def order_chat(monkeypatch, tmp_path):
         "GROUP BY o.status ORDER BY credit_card_amount DESC LIMIT 1",
         ["status", "credit_card_amount", "coupon_amount", "bank_transfer_amount", "gift_card_amount"],
         [["已下单", 14.0, 3.0, 2.0, 1.0]],
-        ["orders.status"],
     ),
 ])
-def test_order_chat_golden_results(order_chat, sql, columns, rows, output_grain):
+def test_order_chat_golden_results(order_chat, sql, columns, rows):
     with TestClient(main.app) as client:
         events, _ = order_chat(client, [sql])
     assert events["done"]["status"] == "completed"
     assert events["result"]["columns"] == columns
     assert events["result"]["rows"] == rows
-    assert events["result"]["output_grain"] == output_grain
+    assert set(events["result"]) == {"columns", "rows", "sql", "source", "elapsed_ms"}
 
 
 @pytest.mark.parametrize("candidate", [
