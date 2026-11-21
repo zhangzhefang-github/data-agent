@@ -3,26 +3,21 @@ version: "v1."
 defaults:
   limit: 500
 rules:
-  - 用户说出时间时，写成 DATE 'YYYY-MM-DD' 条件。
+  - 用户说出时间时，写成 DATE 'YYYY-MM-DD' 或 date_trunc 条件。
   - 用户没有说出时间时，不添加日期条件。
   - 未写 LIMIT 时使用默认行数上限。
-  - 分组使用 GROUP BY ALL。
-  - 子表粒度更细时，先在子查询中按主表键汇总，再关联主表。
+  - 需要先汇总再筛选时，用 WITH 写出子查询。
 examples:
   - sql: >
-      WITH payment_totals AS (
-        SELECT order_id, SUM(amount) AS payment_amount
-        FROM main.payments
-        GROUP BY ALL
+      WITH weekly_sales AS (
+        SELECT
+          customer_id,
+          date_trunc('week', sold_at) AS week,
+          SUM(total_price) AS weekly_total
+        FROM main.sales_transactions
+        WHERE customer_id IS NOT NULL
+        GROUP BY customer_id, date_trunc('week', sold_at)
       )
-      SELECT
-        c.region,
-        SUM(o.amount) AS order_amount,
-        SUM(p.payment_amount) AS payment_amount
-      FROM main.orders AS o
-      JOIN main.customers AS c ON o.customer_id = c.customer_id
-      JOIN payment_totals AS p ON p.order_id = o.order_id
-      WHERE o.order_date BETWEEN DATE '2024-01-01' AND DATE '2024-03-31'
-      GROUP BY ALL
-      ORDER BY order_amount DESC
-      LIMIT 10
+      SELECT DISTINCT customer_id
+      FROM weekly_sales
+      WHERE weekly_total > 150
