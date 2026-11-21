@@ -175,11 +175,14 @@ def build_semantic_context(
         for identifier in space.dimension_ids
         if identifier in selected_dimension_ids and dimensions_by_id[identifier].user_visible
     ]
-    selected_dataset_ids = _context_dataset_ids(selected_metrics, selected_dimensions, space)
-    selected_datasets = [
-        dataset for dataset in model.datasets
-        if dataset.id in selected_dataset_ids and dataset.exposure_policy == "approved"
-    ]
+    # 空间点名的数据集进入投影。受限暴露只去掉敏感列，不再把整张已授权的表丢掉。
+    # raw 与 staging 即使被误写入清单也不进入问数上下文。
+    selected_dataset_ids = {
+        dataset.id
+        for dataset in model.datasets
+        if dataset.id in space.dataset_ids and dataset.dataset_type not in {"staging", "source"}
+    }
+    selected_datasets = [dataset for dataset in model.datasets if dataset.id in selected_dataset_ids]
     approved_dataset_ids = {dataset.id for dataset in selected_datasets}
     selected_metrics = [metric for metric in selected_metrics if metric.source_dataset_id in approved_dataset_ids]
     selected_dimensions = [
@@ -214,7 +217,8 @@ def build_semantic_context(
         ),
         sql=SqlSemanticContext(
             datasets=[
-                _context_dataset(dataset, selected_metrics, selected_dimensions) for dataset in selected_datasets
+                _context_dataset(dataset, selected_metrics, selected_dimensions, selected_relationships)
+                for dataset in selected_datasets
             ],
             relationships=[_context_relationship(relationship) for relationship in selected_relationships],
         ),
@@ -301,11 +305,6 @@ def _include_time_dimensions(
     return dimension_ids | {metrics[identifier].time_dimension_id for identifier in metric_ids if metrics[identifier].time_dimension_id}
 
 
-def _context_dataset_ids(metrics: list[Metric], dimensions: list[Dimension], space: SpaceDefinition) -> set[str]:
-    dependencies = {item.source_dataset_id for item in [*metrics, *dimensions]}
-    return dependencies & set(space.dataset_ids)
-
-
 def _context_objects(model: SemanticModel, dataset_ids: set[str]) -> list[ContextBusinessObject]:
     return [
         ContextBusinessObject(id=business_object.id, name=business_object.name)
@@ -345,21 +344,33 @@ def _context_dimension(
     )
 
 
-def _context_dataset(dataset: Dataset, metrics: list[Metric], dimensions: list[Dimension]) -> ContextDataset:
+def _context_dataset(
+    dataset: Dataset,
+    metrics: list[Metric],
+    dimensions: list[Dimension],
+    relationships,
+) -> ContextDataset:
     referenced = {dimension.field_id for dimension in dimensions if dimension.source_dataset_id == dataset.id}
     referenced.update(
         metric.expression.field_id
         for metric in metrics
         if metric.source_dataset_id == dataset.id and metric.expression.field_id
     )
+    join_keys = set()
+    for relationship in relationships:
+        if relationship.source_dataset_id == dataset.id:
+            join_keys.update(relationship.source_fields)
+        if relationship.target_dataset_id == dataset.id:
+            join_keys.update(relationship.target_fields)
+    referenced.update(join_keys)
     fields = {field.id: field for field in dataset.fields}
     columns = {
         field_id: dataset.physical_mapping.column_mappings[field_id]
         for field_id in referenced
-        if field_id not in dataset.primary_key
-        and field_id in fields
+        if field_id in fields
         and not fields[field_id].sensitive
         and field_id in dataset.physical_mapping.column_mappings
+        and (field_id not in dataset.primary_key or field_id in join_keys)
     }
     return ContextDataset(
         id=dataset.id,

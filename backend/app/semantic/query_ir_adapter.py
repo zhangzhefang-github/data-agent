@@ -37,6 +37,7 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
             "model": dataset.id,
             "column": column,
             "synonyms": dimension.synonyms,
+            "is_time": dimension.is_time,
         }
         if dimension.allowed_values:
             dimensions[wire_id]["values"] = [

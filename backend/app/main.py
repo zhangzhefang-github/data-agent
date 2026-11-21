@@ -215,11 +215,13 @@ async def chat(request: ChatRequest):
                         execute_order_sql, Path(source.location), candidate, CATALOG, business_today, join_keys,
                     )
                 except SqlCorrection as exc:
+                    logger.error("Direct SQL needs repair (%s): %s", exc, candidate)
                     if attempts < 3 and not is_previous_period:
                         return json.dumps({"error": str(exc), "remaining_repairs": 3 - attempts}, ensure_ascii=False)
                     query_error = "SQL 修复后仍无法执行"
                     raise
                 except SqlRejected as exc:
+                    logger.error("Direct SQL rejected (%s): %s", exc, candidate)
                     query_error = str(exc)
                     raise
                 result_data.append(data)
@@ -243,13 +245,22 @@ async def chat(request: ChatRequest):
                     "经典示例只说明方言写法，示例中的表不代表已经授权。"
                     "用户说出时间时写入对应日期条件。用户没有说出时间时不要添加日期条件。"
                     "未写 LIMIT 时使用默认行数上限。"
-                    "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释，日期以结果 SQL 为准。"
-                    "针对去年同期，调用工具提交服务提供的同期 SQL。"
+                    "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
+                    "去年同期的日期已经由服务算好，写在本次提示开头。解释时原样复述，不要再减一年，也不要改成当前业务日期。结果为空时说明该区间没有可对比的订单，不要把空结果说成查询失败。"
+                    "针对去年同期，调用工具提交服务提供的同期 SQL，不要自行改写日期。"
+                    "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
                 )
                 tools = [get_semantic_catalog, resolve_business_terms, execute_direct_sql]
                 prompt += "\n" + render_direct_sql_prompt(ROOT, database)
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
+                    if is_previous_period:
+                        executed_dates = list(dict.fromkeys(re.findall(r"\d{4}-\d{2}-\d{2}", previous_sql)))
+                        if executed_dates:
+                            prompt = (
+                                f"解释只能复述这些已执行日期：{' 至 '.join(executed_dates)}。禁止使用当前业务日期。\n"
+                                + prompt
+                            )
                 run_options["max_turns"] = 8
             elif context:
                 prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n最近一次成功查询的结构化条件：{json.dumps(context, ensure_ascii=False)}\n用户的新问题：{request.message}"

@@ -55,7 +55,7 @@ def test_orders_catalog_is_projected_from_the_published_semantic_model():
         "bank_transfer_amount",
         "gift_card_amount",
     }
-    assert set(catalog["dimensions"]) == {"order_date", "status"}
+    assert set(catalog["dimensions"]) == {"order_date", "status", "customer_id"}
     assert catalog["metric_input_aliases"]["orders.order_count"] == "order_rows"
     assert catalog["dimensions"]["status"]["values"] == [
         {"name": "已下单", "value": "placed"},

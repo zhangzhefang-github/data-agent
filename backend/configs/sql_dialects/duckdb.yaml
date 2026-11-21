@@ -3,21 +3,15 @@ version: "v1."
 defaults:
   limit: 500
 rules:
-  - 用户说出时间时，写成 DATE 'YYYY-MM-DD' 或 date_trunc 条件。
+  - 用户说出时间时，只把日期列与 DATE 'YYYY-MM-DD' 字面量比较或写成 BETWEEN，不要使用 date_trunc。
   - 用户没有说出时间时，不添加日期条件。
   - 未写 LIMIT 时使用默认行数上限。
-  - 需要先汇总再筛选时，用 WITH 写出子查询。
+  - 只提交一条 SELECT。筛选写在 WHERE。不要使用 WITH、子查询、DISTINCT、QUALIFY 或 date_trunc。
 examples:
   - sql: >
-      WITH weekly_sales AS (
-        SELECT
-          customer_id,
-          date_trunc('week', sold_at) AS week,
-          SUM(total_price) AS weekly_total
-        FROM main.sales_transactions
-        WHERE customer_id IS NOT NULL
-        GROUP BY customer_id, date_trunc('week', sold_at)
-      )
-      SELECT DISTINCT customer_id
-      FROM weekly_sales
-      WHERE weekly_total > 150
+      SELECT
+        customer_id,
+        SUM(total_price) AS weekly_total
+      FROM main.sales_transactions
+      WHERE sold_at BETWEEN DATE '2024-01-01' AND DATE '2024-01-07'
+      GROUP BY customer_id

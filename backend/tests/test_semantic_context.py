@@ -76,7 +76,7 @@ def test_orders_context_selects_authorized_terms_and_serializes_without_sensitiv
         "orders.order_date",
         "orders.status",
     ]
-    assert [dataset.id for dataset in context.sql.datasets] == ["order_mart"]
+    assert [dataset.id for dataset in context.sql.datasets] == ["customer_mart", "order_mart"]
     assert [item.id for item in context.sql.relationships] == ["order_mart_customer_mart"]
     assert context.sql.relationships[0].fanout_risk is False
     assert context.business.metric_aliases == {"order_rows": "orders.order_count"}
@@ -105,6 +105,7 @@ def test_orders_context_without_matches_returns_the_authorized_catalog_in_stable
     assert [dimension.id for dimension in context.business.dimensions] == [
         "orders.order_date",
         "orders.status",
+        "orders.customer_id",
     ]
 
 
@@ -114,11 +115,13 @@ def test_orders_context_serialization_omits_technical_keys_and_unapproved_fields
     )
 
     payload = context.model_dump()
-    dataset = payload["sql"]["datasets"][0]
+    datasets = {item["id"]: item for item in payload["sql"]["datasets"]}
+    dataset = datasets["order_mart"]
     assert "primary_key" not in dataset
     assert "grain" not in dataset
     assert "base_grain" not in payload["business"]["metrics"][0]
     assert set(dataset["columns"]) == {
+        "customer_id",
         "order_date",
         "status",
         "amount",
@@ -127,6 +130,7 @@ def test_orders_context_serialization_omits_technical_keys_and_unapproved_fields
         "bank_transfer_amount",
         "gift_card_amount",
     }
+    assert set(datasets["customer_mart"]["columns"]) == {"customer_id"}
     serialized = context.model_dump_json()
     assert "order_id" not in serialized
     assert payload["sql"]["relationships"][0]["source_fields"] == ["customer_id"]
@@ -165,10 +169,11 @@ def test_context_omits_dimensions_that_are_not_user_visible(tmp_path: Path):
     assert [dimension.id for dimension in context.business.dimensions] == [
         "orders.order_date",
         "orders.status",
+        "orders.customer_id",
     ]
 
 
-def test_context_omits_datasets_that_are_not_approved_for_exposure(tmp_path: Path):
+def test_listed_restricted_dataset_keeps_authorized_columns_and_drops_staging(tmp_path: Path):
     model = load_semantic_model(MODEL_PATH)
     next(item for item in model.dimensions if item.id == "customers.first_order").user_visible = True
     spaces_path = tmp_path / "spaces.yaml"
@@ -177,15 +182,17 @@ def test_context_omits_datasets_that_are_not_approved_for_exposure(tmp_path: Pat
             "      - orders.status\n",
             "      - orders.status\n      - customers.first_order\n",
         ).replace(
-            "      - order_mart\n",
-            "      - order_mart\n      - customer_mart\n",
+            "      - customer_mart\n",
+            "      - customer_mart\n      - customer_staging\n",
         )
     )
 
     context = build_semantic_context("sales", "orders", model=model, spaces_path=spaces_path)
 
-    assert "customers.first_order" not in [dimension.id for dimension in context.business.dimensions]
-    assert "customer_mart" not in [dataset.id for dataset in context.sql.datasets]
+    assert "customers.first_order" in [dimension.id for dimension in context.business.dimensions]
+    assert "customer_mart" in [dataset.id for dataset in context.sql.datasets]
+    assert "customer_staging" not in [dataset.id for dataset in context.sql.datasets]
+    assert "first_name" not in context.model_dump_json()
 
 
 def test_orders_context_keeps_dimension_only_match_from_adding_every_metric():

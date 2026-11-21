@@ -76,11 +76,17 @@ def order_database_context(path: Path, tables: list[tuple[str, set[str]]]) -> di
     return {"version": version, "tables": described}
 
 
+def _in_main(node) -> bool:
+    schema = node.args.get("db")
+    name = "" if schema is None else schema.name.lower()
+    return name in {"", "main"} and not node.args.get("catalog")
+
+
 def _column(node, names, qualifier=""):
     return (isinstance(node, exp.Column)
             and node.name.lower() in names
             and node.table.lower() in {"", qualifier}
-            and not node.db and not node.catalog)
+            and _in_main(node))
 
 
 def _date_literal(node) -> exp.Literal:
@@ -101,7 +107,7 @@ def _filter_dates(node, dimensions, qualifier) -> list[exp.Literal]:
     if isinstance(node, (exp.Paren, exp.Not)):
         return _filter_dates(node.this, dimensions, qualifier)
     if not isinstance(node, (*COMPARISONS, exp.Between, exp.In)) or not _column(node.this, dimensions, qualifier):
-        raise SqlRejected("查询筛选限于已授权的订单日期和状态")
+        raise SqlRejected("查询筛选限于已授权维度")
     field = node.this.name.lower()
     if isinstance(node, exp.Between):
         if node.args.get("symmetric"):
@@ -123,7 +129,12 @@ def _filter_dates(node, dimensions, qualifier) -> list[exp.Literal]:
             except ValueError as exc:
                 raise SqlCorrection("订单状态须使用授权字典") from exc
         return []
-    return [_date_literal(value) for value in values]
+    if dimension.get("is_time"):
+        return [_date_literal(value) for value in values]
+    for value in values:
+        if not isinstance(value, exp.Literal) or not value.is_int:
+            raise SqlRejected("非时间维度的筛选只能使用整数")
+    return []
 
 
 def _plain_table(table) -> bool:
@@ -138,7 +149,7 @@ def _equijoin_columns(node) -> tuple[tuple[str, str], tuple[str, str]]:
         raise SqlRejected("关联必须使用已授权的等值条件")
     columns = []
     for side in (node.this, node.expression):
-        if not isinstance(side, exp.Column) or not side.table or side.args.get("db") or side.args.get("catalog"):
+        if not isinstance(side, exp.Column) or not side.table or not _in_main(side):
             raise SqlRejected("关联必须使用已授权的等值条件")
         columns.append((side.table.lower(), side.name.lower()))
     return columns[0], columns[1]
@@ -148,7 +159,8 @@ def _authorize_joins(joins, base: exp.Table, allowed: set[tuple[tuple[str, str],
     known = {base.name.lower()}
     aliases = {(base.alias or base.name).lower(): base.name.lower()}
     for join in joins:
-        if any(join.args.get(key) for key in ("side", "kind", "pivots")):
+        kind = join.args.get("kind")
+        if join.args.get("side") or join.args.get("pivots") or kind not in {None, "INNER"}:
             raise SqlRejected("只允许使用已授权关系的内连接")
         target = join.this
         if not _plain_table(target):

@@ -73,19 +73,31 @@ def order_chat(monkeypatch, tmp_path):
             tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
             assert not any(item.name == "execute_semantic_query" for item in agent.tools)
             assert "方言版本：v" in prompt
-            assert "weekly_sales" in prompt
+            assert "sales_transactions" in prompt
+            assert "WITH weekly_sales" not in prompt
+            assert "不要使用 WITH" in prompt
             assert "本次授权的表：" in prompt
             authorized = prompt.split("本次授权的表：", 1)[1].split("授权关系：", 1)[0]
             objects = prompt.split("业务对象：", 1)[1].split("本次授权的表：", 1)[0]
             assert "main.orders" in authorized
-            assert "customer_id" not in authorized
+            assert "main.customers" in authorized
+            assert "customer_id" in authorized
+            assert "first_name" not in prompt
+            assert "last_name" not in prompt
             relations = prompt.split("授权关系：", 1)[1].split("授权指标：", 1)[0]
             assert "order_mart_customer_mart" in relations
             assert "'source': 'orders'" in relations
             assert "'target': 'customers'" in relations
+            assert "many_to_one" in relations
             assert "order_to_payment" not in relations
             assert "'id': 'order'" in objects
-            assert "customer" not in objects
+            assert "'id': 'customer'" in objects
+            dialect_rules = prompt.split("方言规则：", 1)[1].split("经典示例", 1)[0]
+            assert "order_date" not in dialect_rules
+            assert "只能原样写 order_date" not in prompt
+            assert "不要 JOIN" not in prompt
+            assert "不要另起别名" in prompt
+            assert "本次执行 SQL" in agent.instructions
             assert "第一季度是 1–3 月" in prompt
             assert "不要再与 amount 相加" in prompt
             return Run()
@@ -134,6 +146,45 @@ def test_order_chat_golden_results(order_chat, sql, columns, rows):
     assert set(events["result"]) == {"columns", "rows", "sql", "source", "elapsed_ms"}
 
 
+def test_explicit_inner_join_counts_orders_that_match_a_customer(order_chat):
+    sql = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount "
+        "FROM main.orders "
+        "INNER JOIN main.customers ON main.orders.customer_id = main.customers.customer_id "
+        "WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-03-01'"
+    )
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, [sql])
+    assert events["done"]["status"] == "completed"
+    assert events["result"]["rows"] == [[3, 35.0]]
+
+
+def test_schema_qualified_customer_join_counts_orders_in_the_window(order_chat):
+    sql = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount "
+        "FROM main.orders "
+        "JOIN main.customers ON main.orders.customer_id = main.customers.customer_id "
+        "WHERE main.orders.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-03-01'"
+    )
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, [sql])
+    assert events["done"]["status"] == "completed"
+    assert events["result"]["rows"] == [[3, 35.0]]
+
+
+def test_group_by_customer_identifier_sums_back_to_the_order_count(order_chat):
+    sql = (
+        "SELECT customer_id, COUNT(*) AS order_rows FROM orders "
+        "WHERE order_date BETWEEN '2018-01-01' AND '2018-03-01' "
+        "GROUP BY customer_id ORDER BY customer_id"
+    )
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, [sql])
+    assert events["done"]["status"] == "completed"
+    assert events["result"]["rows"] == [[14, 1], [15, 1], [16, 1]]
+    assert sum(row[1] for row in events["result"]["rows"]) == 3
+
+
 def test_aliased_customer_order_join_keeps_order_count_and_amount(order_chat):
     sql = (
         "SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount "
@@ -153,7 +204,7 @@ def test_aliased_customer_order_join_keeps_order_count_and_amount(order_chat):
     "SELECT COUNT(*) AS order_rows FROM orders JOIN customers ON TRUE",
     "SELECT COUNT(*) AS order_rows FROM orders LEFT JOIN customers ON orders.customer_id = customers.customer_id",
     "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id",
-    "SELECT COUNT(*) AS order_rows FROM orders WHERE customer_id = 10",
+    "SELECT first_name, COUNT(*) AS order_rows FROM orders",
     "SELECT COUNT(*) AS order_rows FROM range(10)",
 ])
 def test_failed_repair_is_checked_for_authorization(order_chat, candidate):

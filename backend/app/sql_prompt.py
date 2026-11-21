@@ -65,6 +65,16 @@ def render_direct_sql_prompt(root: Path, database: dict) -> str:
         for dimension in context.business.dimensions
         if dimension.allowed_values
     ]
+    columns_by_dataset = {dataset.id: dataset.columns for dataset in context.sql.datasets}
+    dimensions = [
+        {
+            "name": dimension.name,
+            "column": columns_by_dataset[dimension.source_dataset_id][dimension.field_id],
+            "is_time": dimension.is_time,
+        }
+        for dimension in context.business.dimensions
+        if dimension.field_id in columns_by_dataset.get(dimension.source_dataset_id, {})
+    ]
     example = "\n".join(item["sql"].strip() for item in dialect["examples"])
     rules = "\n".join(f"- {rule}" for rule in dialect["rules"])
     physical = {
@@ -88,14 +98,22 @@ def render_direct_sql_prompt(root: Path, database: dict) -> str:
     return (
         f"方言版本：{database['version']}\n"
         f"方言规则：\n{rules}\n"
-        f"经典示例（只说明写法，其中的表不一定已授权）：\n{example}\n"
+        f"经典示例（只说明方言写法，不要模仿其中的 WITH、子查询、DISTINCT 或 date_trunc，其中的表也不一定已授权）：\n{example}\n"
         f"业务对象：{[{'id': item.id, 'name': item.name} for item in context.business.objects]}\n"
         f"本次授权的表：{database['tables']}\n"
         f"授权关系：{relationships}\n"
         f"授权指标：{metrics}\n"
         f"日历：{None if context.business.calendar is None else context.business.calendar.model_dump()}\n"
+        f"授权维度：{dimensions}\n"
         f"状态字典：{values}\n"
-        f"过滤规则：{context.business.filter_rules}"
+        f"过滤规则：{context.business.filter_rules}\n"
+        "本次查询约束：直接查询本次授权的表，只提交一条 SELECT。"
+        "不要使用 WITH、子查询、DISTINCT、QUALIFY、date_trunc，也不要模仿经典示例的这些写法。"
+        "筛选和分组只能使用授权维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
+        "有状态字典的维度在 WHERE 中使用字典里的字面量，不要用 CASE 翻译。"
+        "维度列在 SELECT 和 GROUP BY 中必须使用授权维度的 column，不要另起别名。"
+        "是否关联由问题决定，只使用授权关系中的等值内连接。"
+        "指标表达式和结果别名必须与授权指标完全一致，不要相减或改写。"
     )
 
 

@@ -12,6 +12,7 @@ spaces:
     dimension_ids:
       - orders.order_date
       - orders.status
+      - orders.customer_id
     dataset_ids:
       - order_mart
       - customer_mart
@@ -37,5 +38,7 @@ spaces:
     filter_rules:
       - 订单日期以 Asia/Shanghai 业务日解释。
       - 订单状态仅使用 Space 授权的状态字典。
+      - 客户记录以授权关系的等值内连接为准，不要用客户标识是否为空代替。
+      - 用户询问客户姓名时，用客户标识回答，并说明姓名未授权。
     sql_examples:
       - 按订单状态汇总订单金额和订单笔数。

@@ -175,6 +175,7 @@ dataset_relationships:
 dimensions:
   - {id: orders.order_date, name: 订单日期, source_dataset_id: order_mart, field_id: order_date, is_time: true, synonyms: [日期], user_visible: true}
   - {id: orders.status, name: 订单状态, source_dataset_id: order_mart, field_id: status, synonyms: [状态], user_visible: true}
+  - {id: orders.customer_id, name: 客户标识, source_dataset_id: order_mart, field_id: customer_id, synonyms: [客户], user_visible: true}
   - {id: customers.first_order, name: 首次订单日期, source_dataset_id: customer_mart, field_id: first_order}
   - {id: customers.most_recent_order, name: 最近订单日期, source_dataset_id: customer_mart, field_id: most_recent_order}
 metrics:
@@ -185,7 +186,7 @@ metrics:
     source_dataset_id: order_mart
     base_grain: [order_id]
     time_dimension_id: orders.order_date
-    compatible_dimension_ids: [orders.order_date, orders.status]
+    compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     additive: true
     unit: source_amount
     synonyms: [金额]
@@ -197,7 +198,7 @@ metrics:
     source_dataset_id: order_mart
     base_grain: [order_id]
     time_dimension_id: orders.order_date
-    compatible_dimension_ids: [orders.order_date, orders.status]
+    compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     additive: true
     unit: orders
     synonyms: [订单数, 订单笔数]
@@ -209,7 +210,7 @@ metrics:
     source_dataset_id: order_mart
     base_grain: [order_id]
     time_dimension_id: orders.order_date
-    compatible_dimension_ids: [orders.order_date, orders.status]
+    compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
     published: true
   - id: orders.coupon_amount
@@ -219,7 +220,7 @@ metrics:
     source_dataset_id: order_mart
     base_grain: [order_id]
     time_dimension_id: orders.order_date
-    compatible_dimension_ids: [orders.order_date, orders.status]
+    compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
     published: true
   - id: orders.bank_transfer_amount
@@ -229,7 +230,7 @@ metrics:
     source_dataset_id: order_mart
     base_grain: [order_id]
     time_dimension_id: orders.order_date
-    compatible_dimension_ids: [orders.order_date, orders.status]
+    compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
     published: true
   - id: orders.gift_card_amount
@@ -239,6 +240,6 @@ metrics:
     source_dataset_id: order_mart
     base_grain: [order_id]
     time_dimension_id: orders.order_date
-    compatible_dimension_ids: [orders.order_date, orders.status]
+    compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
     published: true
