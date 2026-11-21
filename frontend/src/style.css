@@ -10,6 +10,17 @@ body { margin: 0; color: #243044; font-family: Inter, "Microsoft Yahei", sans-se
 .content header h3 { margin: 0 0 4px; }
 .transcript { flex: 1; overflow: auto; padding: 24px 32px 8px; display: flex; flex-direction: column; gap: 16px; }
 .turn { display: flex; flex-direction: column; gap: 12px; }
+.user-turn { align-self: flex-end; max-width: 36rem; background: #e7eef3; border-radius: 12px; padding: 12px 16px; line-height: 1.6; }
+.answer-card { border: none; box-shadow: none; }
+.answer-card .ant-card-head { border-bottom: 0; min-height: 42px; padding: 0 20px; }
+.answer-card .ant-card-head-title { font-size: 13px; color: #637688; font-weight: 600; }
+.answer-card .ant-card-body { padding-top: 0; }
+.answer { max-width: 42rem; color: #243044; font-size: 15px; line-height: 1.75; }
+.answer p { margin: 0 0 10px; }
+.answer ul { margin: 0 0 12px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.answer li { background: #f5f7fa; border-radius: 8px; padding: 10px 12px; }
+.answer-note { color: #637688; }
+.code-token { display: inline-block; margin: 0 2px; padding: 0 6px; border-radius: 4px; background: #e7eef3; color: #637688; font-size: 12px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; line-height: 1.6; }
 .intro { background: #edf5f3; border: none; }
 .intro p, .status { color: #637688; margin: 0; }
 .composer { flex: none; background: white; border-top: 1px solid #e7ebef; padding: 16px 32px 20px; }

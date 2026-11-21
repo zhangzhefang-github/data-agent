@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Button, Card, Input, Layout, Typography } from 'antd'
-import { Feedback, ResultView, type Rating, type Result } from './ResultView'
+import { AnswerBody, Feedback, ResultView, type Rating, type Result } from './ResultView'
 import 'antd/dist/reset.css'
 import './style.css'
 
@@ -106,15 +106,15 @@ function App() {
       </header>
       <div className="transcript" ref={transcriptRef}>
         {messages.map(message => <div className="turn" key={message.id}>
-          <Card title={message.role === 'user' ? '你' : '分析'}>
-            {message.content}
-            {message.role === 'assistant' && <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />}
-          </Card>
+          {message.role === 'user' ? <div className="user-turn">{message.content}</div> : <Card className="answer-card" title="说明">
+            <AnswerBody text={message.content} />
+            <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
+          </Card>}
           {message.result && <ResultView data={message.result} />}
         </div>)}
         {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>{spaceId === 'orders' ? '例如：查询各订单状态的订单金额' : '例如：查询今年各城市的销售额'}</p></Card>}
         {status && <p className="status">{status}</p>}
-        {answer && <Card title="分析">{answer}</Card>}
+        {answer && <Card className="answer-card" title="说明"><AnswerBody text={answer} /></Card>}
         {result && <ResultView data={result} />}
       </div>
       <div className="composer">

@@ -4,7 +4,7 @@ import * as echarts from 'echarts'
 
 export type Result = { columns: string[], rows: (string | number | null)[][], sql: string, source: string, elapsed_ms: number }
 export type Rating = 'correct' | 'incorrect'
-const labels: Record<string, string> = { city: '城市', store: '门店', product: '产品', stat_date: '业务日期', sales_amount: '销售额（元）', order_count: '订单量', average_order_value: '客单价（元）', order_date: '订单日期', status: '订单状态', order_amount: '订单金额', order_rows: '订单笔数', credit_card_amount: '信用卡金额', coupon_amount: '优惠券金额', bank_transfer_amount: '银行转账金额', gift_card_amount: '礼品卡金额' }
+const labels: Record<string, string> = { city: '城市', store: '门店', product: '产品', stat_date: '业务日期', sales_amount: '销售额（元）', order_count: '订单量', average_order_value: '客单价（元）', order_date: '订单日期', status: '订单状态', customer_id: '客户标识', order_amount: '订单金额', order_rows: '订单笔数', credit_card_amount: '信用卡金额', coupon_amount: '优惠券金额', bank_transfer_amount: '银行转账金额', gift_card_amount: '礼品卡金额' }
 const metrics = ['sales_amount', 'order_count', 'average_order_value', 'order_amount', 'order_rows', 'credit_card_amount', 'coupon_amount', 'bank_transfer_amount', 'gift_card_amount']
 
 type ChartKind = '柱状图' | '折线图' | '饼图'
@@ -55,6 +55,33 @@ export function ResultView({ data }: { data: Result }) {
     </>}
     <details><summary>查看 SQL</summary><pre>{data.sql}</pre></details>
   </Card>
+}
+
+function pieces(text: string) {
+  const chunks = text.split(/(\([^)]+\)|（[^）]+）)/)
+  return chunks.map((chunk, index) => {
+    const code = chunk.startsWith('(') && chunk.endsWith(')') ? chunk.slice(1, -1)
+      : chunk.startsWith('（') && chunk.endsWith('）') ? chunk.slice(1, -1) : ''
+    return code ? <span className="code-token" key={index}>{code}</span> : <span key={index}>{chunk}</span>
+  })
+}
+
+export function AnswerBody({ text }: { text: string }) {
+  const lines = text.split(/\n+/).map(line => line.trim()).filter(Boolean)
+  const itemLines = lines.filter(line => /^[-•]\s+/.test(line) || line.startsWith('- '))
+  if (itemLines.length >= 2) {
+    const first = lines.findIndex(line => /^[-•]\s+/.test(line))
+    const last = lines.reduce((index, line, current) => /^[-•]\s+/.test(line) ? current : index, -1)
+    const intro = lines.slice(0, first).join('')
+    const items = lines.slice(first, last + 1).map(line => line.replace(/^[-•]\s+/, ''))
+    const closing = lines.slice(last + 1).join('')
+    return <div className="answer">
+      {intro && <p>{pieces(intro.replace(/[：:]\s*$/, ''))}</p>}
+      <ul>{items.map(item => <li key={item}>{pieces(item.replace(/。$/, ''))}</li>)}</ul>
+      {closing && <p className="answer-note">{pieces(closing)}</p>}
+    </div>
+  }
+  return <div className="answer">{lines.map(paragraph => <p key={paragraph}>{pieces(paragraph)}</p>)}</div>
 }
 
 export function Feedback({ messageId, rating, onChange }: { messageId: string, rating?: Rating | null, onChange: (rating: Rating) => void }) {
