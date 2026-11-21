@@ -134,6 +134,18 @@ def test_order_chat_golden_results(order_chat, sql, columns, rows):
     assert set(events["result"]) == {"columns", "rows", "sql", "source", "elapsed_ms"}
 
 
+def test_aliased_customer_order_join_keeps_order_count_and_amount(order_chat):
+    sql = (
+        "SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount "
+        "FROM orders AS o JOIN customers AS c ON c.customer_id = o.customer_id"
+    )
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, [sql])
+    assert events["done"]["status"] == "completed"
+    assert events["result"]["columns"] == ["order_rows", "order_amount"]
+    assert events["result"]["rows"] == [[608, 940.0]]
+
+
 @pytest.mark.parametrize("candidate", [
     HISTORICAL + "; SELECT 1",
     "DELETE FROM orders",

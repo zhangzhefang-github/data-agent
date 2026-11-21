@@ -155,9 +155,11 @@ def _authorize_joins(joins, base: exp.Table, allowed: set[tuple[tuple[str, str],
             raise SqlRejected("查询包含未授权的表关联")
         target.set("db", exp.to_identifier("main"))
         name = target.name.lower()
+        visible = dict(aliases)
+        visible[(target.alias or target.name).lower()] = name
         left, right = _equijoin_columns(join.args.get("on"))
-        left_table = aliases.get(left[0], left[0])
-        right_table = aliases.get(right[0], right[0])
+        left_table = visible.get(left[0], left[0])
+        right_table = visible.get(right[0], right[0])
         pair = tuple(sorted(((left_table, left[1]), (right_table, right[1]))))
         other = right_table if name == left_table else left_table
         if pair not in allowed or name not in {left_table, right_table} or name in known or other not in known:
