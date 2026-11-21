@@ -135,12 +135,15 @@ async def chat(request: ChatRequest):
         direct_sql = CATALOG["id"] == "orders" and source.engine == "duckdb"
         business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
         previous_sql = None
-        if direct_sql and context:
-            try:
-                previous_sql = prior_order_sql(
-                    context, CATALOG, business_today, shift=last_year if is_previous_period else None,
-                )
-            except (ValueError, KeyError, TypeError):
+        if direct_sql:
+            if context and context.get("mode") == "orders_duckdb" and isinstance(context.get("sql"), str):
+                try:
+                    previous_sql = prior_order_sql(
+                        context["sql"], CATALOG, business_today, shift=last_year if is_previous_period else None,
+                    )
+                except ValueError:
+                    context = None
+            else:
                 context = None
         elif context and context.get("mode") == "orders_duckdb":
             context = None

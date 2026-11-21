@@ -155,16 +155,14 @@ def test_rows_are_capped_before_returning_results(order_chat):
     assert events["result"]["rows"][0] == ["2010-01-01", 1]
 
 
-def test_legacy_follow_up_preserves_history_and_shifts_leap_day(order_chat):
-    conversation_id = main.conversations.create(main.CONVERSATIONS, "已完成订单")
-    old_result = {"columns": ["order_rows"], "rows": [[12]], "sql": "old", "source": "DuckDB", "elapsed_ms": 0}
-    main.conversations.add_message(
-        main.CONVERSATIONS, conversation_id, "assistant", "旧结果", old_result,
-        {"metrics": ["orders.order_count"], "dimensions": [],
-         "filters": [{"field": "status", "operator": "eq", "value": "已完成"}],
-         "time_range": {"start": "2024-02-01", "end": "2024-02-29"}},
+def test_direct_follow_up_keeps_last_success_after_failure_and_shifts_leap_day(order_chat):
+    sql = (
+        "SELECT COUNT(*) AS order_rows FROM orders "
+        "WHERE order_date BETWEEN '2024-02-01' AND '2024-02-29' AND status = '已完成'"
     )
     with TestClient(main.app) as client:
+        first, _ = order_chat(client, [sql])
+        conversation_id = first["conversation"]["conversation_id"]
         route = f"/api/conversations/{conversation_id}"
         before = client.get(route).json()
         failed, _ = order_chat(client, ["DELETE FROM orders"], conversation_id=conversation_id)
@@ -174,7 +172,7 @@ def test_legacy_follow_up_preserves_history_and_shifts_leap_day(order_chat):
         after = client.get(route).json()
     assert events["result"]["rows"] == [[1]]
     assert "2023-02-28" in events["result"]["sql"]
-    assert after["messages"][0]["result"] == old_result
+    assert after["messages"][1]["result"] == first["result"]
     assert after["last_query"]["mode"] == "orders_duckdb"
 
 

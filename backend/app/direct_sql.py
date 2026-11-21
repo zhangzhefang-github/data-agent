@@ -10,7 +10,7 @@ import duckdb
 from sqlglot import exp, parse, parse_one
 from sqlglot.errors import ParseError
 
-from app.query import Query, normalize_query, physical_value
+from app.query import physical_value
 
 MAX_ROWS = 500
 QUERY_TIMEOUT = 5
@@ -246,41 +246,7 @@ def _json_rows(rows):
                else value for value in row]
 
 
-def _legacy_sql(context: dict, catalog: dict, today: date) -> str:
-    plan = normalize_query(Query.model_validate(context), catalog)
-    metrics, dimensions = catalog["metrics"], catalog["dimensions"]
-    projections = [exp.alias_(exp.column(dimensions[name]["column"]), name) for name in plan.dimensions]
-    projections += [exp.alias_(parse_one(metrics[name]["expression"]), name) for name in plan.metrics]
-    model = _order_table(catalog)
-    date_field = exp.column(model["date_column"])
-    start = plan.time_range.start if plan.time_range else today.replace(month=1, day=1)
-    end = plan.time_range.end if plan.time_range else today
-    tree = exp.select(*projections).from_("main.orders").where(
-        exp.Between(this=date_field, low=exp.Literal.string(start.isoformat()), high=exp.Literal.string(end.isoformat()))
-    )
-    equals = {}
-    operators = dict(zip(("eq", "ne", "gt", "gte", "lt", "lte"), COMPARISONS, strict=True))
-    for item in plan.filters:
-        dimension = dimensions[item.field]
-        value = exp.Literal.string(physical_value(dimension, item.value))
-        if item.operator == "eq":
-            equals.setdefault(item.field, []).append(value)
-        else:
-            tree = tree.where(operators[item.operator](this=exp.column(dimension["column"]), expression=value))
-    for field, values in equals.items():
-        tree = tree.where(exp.In(this=exp.column(dimensions[field]["column"]), expressions=values))
-    if plan.dimensions:
-        tree = tree.group_by(*(exp.column(dimensions[name]["column"]) for name in plan.dimensions))
-    if plan.order_by:
-        tree = tree.order_by(exp.Ordered(this=exp.column(plan.order_by.field), desc=plan.order_by.direction == "desc"))
-    return tree.limit(plan.limit).sql(dialect="duckdb")
-
-
-def prior_order_sql(context: dict, catalog: dict, today: date, *, shift=None) -> str:
-    if context.get("mode") == "orders_duckdb":
-        sql = context["sql"]
-    else:
-        sql = _legacy_sql(context, catalog, today)
+def prior_order_sql(sql: str, catalog: dict, today: date, *, shift=None) -> str:
     tree, _, dates = _validate_order_sql(sql, catalog, today)
     if shift:
         for literal in dates:
