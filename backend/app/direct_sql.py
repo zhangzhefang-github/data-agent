@@ -10,7 +10,7 @@ import duckdb
 from sqlglot import exp, parse, parse_one
 from sqlglot.errors import ParseError
 
-from app.query import physical_value
+from app.query import physical_value, query_output_grain
 
 MAX_ROWS = 500
 QUERY_TIMEOUT = 5
@@ -151,21 +151,26 @@ def _validate_order_sql(sql: str, catalog: dict, today: date):
     table.set("db", exp.to_identifier("main"))
     qualifier = (table.alias or table.name).lower()
     dimensions = {item["column"]: item for item in catalog["dimensions"].values()}
-    metrics = catalog["metrics"]
+    metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
     columns = []
     grouped = []
+    missing_aliases = []
     for selection in tree.expressions:
         name = selection.alias_or_name.lower()
         value = selection.this if isinstance(selection, exp.Alias) else selection
         if _column(value, dimensions, qualifier) and name == value.name.lower():
             grouped.append(name)
         elif name in metrics:
-            expected = parse_one(metrics[name]["expression"], read="duckdb")
-            if not _matches_metric(value, expected, qualifier):
+            if not _matches_metric(value, metrics[name], qualifier):
                 raise SqlCorrection(f"指标 {name} 须使用已发布的聚合口径")
         else:
-            raise SqlRejected("查询包含未授权的指标或维度")
+            matching = [metric for metric, expression in metrics.items() if _matches_metric(value, expression, qualifier)]
+            if len(matching) != 1:
+                raise SqlRejected("查询包含未授权的指标或维度")
+            missing_aliases.append(matching[0])
         columns.append(name)
+    if missing_aliases:
+        raise SqlCorrection(f"请使用获准的指标结果列别名：{'、'.join(missing_aliases)}")
     if len(set(columns)) != len(columns) or not set(columns).intersection(metrics):
         raise SqlCorrection("请使用至少一个获准指标及唯一的结果列名")
     group = tree.args.get("group")
@@ -185,7 +190,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date):
                 name = value.name.lower()
             else:
                 name = next((name for name in columns if name in metrics and _matches_metric(
-                    value, parse_one(metrics[name]["expression"], read="duckdb"), qualifier,
+                    value, metrics[name], qualifier,
                 )), None)
             if name is None:
                 raise SqlRejected("排序限于已选择的指标及维度")
@@ -241,6 +246,7 @@ def execute_order_sql(path: Path, sql: str, catalog: dict, today: date) -> dict:
         "rows": [[status_names.get(value, value) if name == "status" else value
                   for name, value in zip(columns, row, strict=True)] for row in _json_rows(rows)],
         "sql": tree.sql(dialect="duckdb", pretty=True, comments=False),
+        "output_grain": query_output_grain([name for name in columns if name in catalog["dimensions"]], catalog),
         "source": "DuckDB",
         "elapsed_ms": round((monotonic() - start) * 1000, 2),
     }

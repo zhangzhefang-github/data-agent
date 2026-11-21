@@ -135,11 +135,11 @@ def normalize_query(query: Query, catalog: dict) -> Query:
     })
 
 
-def query_output_grain(query: Query, catalog: dict) -> list[str]:
+def query_output_grain(dimensions: list[str], catalog: dict) -> list[str]:
     """查询输出粒度：结果中一行代表的分组，独立于数据集粒度和指标基础粒度。"""
     aliases = catalog.get('dimension_input_aliases') or {}
     canonical_by_wire = {wire_id: canonical_id for canonical_id, wire_id in aliases.items()}
-    return [canonical_by_wire.get(dimension, dimension) for dimension in query.dimensions]
+    return [canonical_by_wire.get(dimension, dimension) for dimension in dimensions]
 
 
 def execute_query(path: Path, query: Query, today: date, catalog: dict | None = None, database_url: str | None = None, source: DataSource | None = None) -> dict:
@@ -272,7 +272,7 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
         'columns': [*query.dimensions, *query.metrics],
         'rows': [[value.isoformat() if isinstance(value, date) else float(value) if isinstance(value, Decimal) else value for value in row] for row in rows],
         'sql': sql,
-        'output_grain': query_output_grain(query, catalog),
+        'output_grain': query_output_grain(query.dimensions, catalog),
         'source': labels[source.engine],
         'elapsed_ms': round((time.monotonic() - start) * 1000, 2),
     }

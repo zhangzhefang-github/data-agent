@@ -92,10 +92,10 @@ def order_chat(monkeypatch, tmp_path):
     return ask
 
 
-@pytest.mark.parametrize(("sql", "columns", "rows"), [
-    (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]]),
-    (TOTALS, ["order_rows", "order_amount"], [[2, 30.0]]),
-    (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], []),
+@pytest.mark.parametrize(("sql", "columns", "rows", "output_grain"), [
+    (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]], []),
+    (TOTALS, ["order_rows", "order_amount"], [[2, 30.0]], []),
+    (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], [], []),
     (
         "SELECT status, SUM(credit_card_amount) AS credit_card_amount, SUM(coupon_amount) AS coupon_amount, "
         "SUM(bank_transfer_amount) AS bank_transfer_amount, SUM(gift_card_amount) AS gift_card_amount "
@@ -103,14 +103,16 @@ def order_chat(monkeypatch, tmp_path):
         "GROUP BY o.status ORDER BY credit_card_amount DESC LIMIT 1",
         ["status", "credit_card_amount", "coupon_amount", "bank_transfer_amount", "gift_card_amount"],
         [["已下单", 14.0, 3.0, 2.0, 1.0]],
+        ["orders.status"],
     ),
 ])
-def test_order_chat_golden_results(order_chat, sql, columns, rows):
+def test_order_chat_golden_results(order_chat, sql, columns, rows, output_grain):
     with TestClient(main.app) as client:
         events, _ = order_chat(client, [sql])
     assert events["done"]["status"] == "completed"
     assert events["result"]["columns"] == columns
     assert events["result"]["rows"] == rows
+    assert events["result"]["output_grain"] == output_grain
 
 
 @pytest.mark.parametrize("candidate", [
@@ -141,6 +143,23 @@ def test_query_repairs_are_bounded(order_chat):
     assert "result" not in failed
     assert repaired[-1]["rows"] == [[3, 35.0]]
     assert success["result"]["rows"] == [[3, 35.0]]
+
+
+def test_order_metric_alias_can_be_repaired(order_chat):
+    guessed_aliases = HISTORICAL.replace("AS order_rows", "AS order_count").replace(
+        "AS order_amount", "AS total_amount",
+    )
+    with TestClient(main.app) as client:
+        events, replies = order_chat(
+            client, [guessed_aliases, HISTORICAL],
+            "2018 年有多少笔订单，订单金额是多少？",
+        )
+    assert replies[0]["remaining_repairs"] == 2
+    assert "order_rows" in replies[0]["error"]
+    assert "order_amount" in replies[0]["error"]
+    assert events["result"]["columns"] == ["order_rows", "order_amount"]
+    assert events["result"]["rows"] == [[3, 35.0]]
+    assert events["done"]["status"] == "completed"
 
 
 def test_rows_are_capped_before_returning_results(order_chat):

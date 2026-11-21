@@ -234,7 +234,7 @@ async def chat(request: ChatRequest):
                 database = await asyncio.to_thread(order_database_context, Path(source.location), CATALOG)
                 instructions = (
                     "你是订单主题空间助手。用 execute_direct_sql 提交一条 DuckDB SELECT，"
-                    "只访问 main.orders。指标按语义目录的表达式计算，并使用目录指标 ID 作为别名。"
+                    "只访问 main.orders。使用授权指标中指定的表达式和结果列别名。"
                     "维度使用原有列名。支持订单日期与订单状态字面量筛选、分组、排序和 LIMIT。"
                     "无日期条件时服务默认今年截至今天。需要历史窗口时在 WHERE 写出正确日期。"
                     "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
@@ -242,6 +242,11 @@ async def chat(request: ChatRequest):
                 )
                 tools = [get_semantic_catalog, resolve_business_terms, execute_direct_sql]
                 prompt += f"\n授权数据库上下文：{json.dumps(database, ensure_ascii=False)}"
+                metrics = {
+                    name: {"name": metric["name"], "expression": metric["expression"]}
+                    for name, metric in CATALOG["metrics"].items()
+                }
+                prompt += f"\n授权指标（键为 SQL 结果列别名）：{json.dumps(metrics, ensure_ascii=False)}"
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
                 run_options["max_turns"] = 8
