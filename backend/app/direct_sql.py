@@ -199,11 +199,6 @@ def _validate_order_sql(sql: str, catalog: dict, today: date):
             item.set("this", exp.Literal.number(columns.index(name) + 1))
     where = tree.args.get("where")
     dates = _filter_dates(where.this, dimensions, qualifier) if where else []
-    if not dates:
-        field = exp.column(model["date_column"], table=qualifier)
-        tree = tree.where(exp.Between(this=field, low=exp.Literal.string(today.replace(month=1, day=1).isoformat()),
-                                      high=exp.Literal.string(today.isoformat())), copy=False)
-        dates = _filter_dates(tree.args["where"].this, dimensions, qualifier)
     having = tree.args.get("having")
     count_matches = having and isinstance(having.this, exp.GT) and _matches_metric(
         having.this.left, parse_one("COUNT(*)"), qualifier) and having.this.right == exp.Literal.number(0)

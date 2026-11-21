@@ -96,7 +96,7 @@ def order_chat(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize(("sql", "columns", "rows"), [
     (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]]),
-    (TOTALS, ["order_rows", "order_amount"], [[2, 30.0]]),
+    (TOTALS, ["order_rows", "order_amount"], [[608, 940.0]]),
     (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], []),
     (
         "SELECT status, SUM(credit_card_amount) AS credit_card_amount, SUM(coupon_amount) AS coupon_amount, "

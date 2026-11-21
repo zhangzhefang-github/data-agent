@@ -1,7 +1,11 @@
 engine: duckdb
 version: "v1."
+defaults:
+  limit: 500
 rules:
-  - 日期写成 DATE 'YYYY-MM-DD'。
+  - 用户说出时间时，写成 DATE 'YYYY-MM-DD' 条件。
+  - 用户没有说出时间时，不添加日期条件。
+  - 未写 LIMIT 时使用默认行数上限。
   - 分组使用 GROUP BY ALL。
   - 子表粒度更细时，先在子查询中按主表键汇总，再关联主表。
 examples:
