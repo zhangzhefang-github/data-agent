@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 from app.demo import initialize
 from app import conversations
 from app.direct_sql import SqlCorrection, SqlRejected, SqlTimeout, execute_order_sql, order_database_context, prior_order_sql
-from app.sql_prompt import authorized_joins, authorized_tables, render_direct_sql_prompt
+from app.query_scope import is_query_scope_question
+from app.sql_prompt import authorized_joins, authorized_tables, orders_query_scope, render_direct_sql_prompt
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
@@ -151,6 +152,15 @@ async def chat(request: ChatRequest):
         elif context and context.get("mode") == "orders_duckdb":
             context = None
 
+        if direct_sql and is_query_scope_question(request.message):
+            message = orders_query_scope(ROOT)
+            yield event("conversation", {"conversation_id": conversation_id})
+            yield event("text", {"delta": message})
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
+            yield event("message", {"id": message_id})
+            yield event("done", {"status": "completed"})
+            return
+
         if is_previous_period and not context:
             message = f"请先提供需要对比的{CATALOG['name']}查询，再询问去年同期。"
             yield event("conversation", {"conversation_id": conversation_id})
@@ -249,6 +259,7 @@ async def chat(request: ChatRequest):
                     "去年同期的日期已经由服务算好，写在本次提示开头。解释时原样复述，不要再减一年，也不要改成当前业务日期。结果为空时说明该区间没有可对比的订单，不要把空结果说成查询失败。"
                     "针对去年同期，调用工具提交服务提供的同期 SQL，不要自行改写日期。"
                     "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
+                    "用户询问可查询范围时，只回复提示中的可查询范围原文，不要调用工具。"
                 )
                 tools = [get_semantic_catalog, resolve_business_terms, execute_direct_sql]
                 prompt += "\n" + render_direct_sql_prompt(ROOT, database)

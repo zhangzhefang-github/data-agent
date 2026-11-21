@@ -6,7 +6,7 @@ import pytest
 
 from app.semantic.catalog import profile_jaffle_shop
 from app.semantic.loader import load_semantic_model
-from app.semantic.models import MetricFilter
+from app.semantic.models import DatasetRelationship, MetricFilter
 from app.semantic.registry import SemanticModelRegistry
 from app.semantic.validator import validate_dataset_join, validate_semantic_model
 
@@ -292,6 +292,95 @@ def test_validator_rejects_customer_grain_default_filter_on_order_metric():
     assert [(item.object_id, item.field, item.code) for item in result.errors] == [
         ("orders.order_amount", "default_filters.dimension_id", "incompatible_grain")
     ]
+
+
+def test_authorized_customer_order_relationship_is_an_inner_equijoin():
+    relationship = next(
+        item for item in load_semantic_model(MODEL_PATH).dataset_relationships if item.id == "order_mart_customer_mart"
+    )
+
+    assert relationship.join_type == "inner"
+    assert relationship.cardinality == "many_to_one"
+    assert relationship.fanout_risk is False
+    assert relationship.verification_status == "profiled"
+
+
+def test_reverse_many_to_one_is_rejected_until_the_one_side_is_preaggregated():
+    model = load_semantic_model(MODEL_PATH)
+    relationship = next(item for item in model.dataset_relationships if item.id == "order_mart_customer_mart")
+    relationship.verification_status = "confirmed"
+
+    reversed_join = validate_dataset_join(
+        model,
+        "customer_mart",
+        "order_mart",
+        allowed_relationship_ids={relationship.id},
+    )
+    safe_direction = validate_dataset_join(
+        model,
+        "order_mart",
+        "customer_mart",
+        allowed_relationship_ids={relationship.id},
+    )
+    preaggregated = validate_dataset_join(
+        model,
+        "customer_mart",
+        "order_mart",
+        allowed_relationship_ids={relationship.id},
+        preaggregated_source=True,
+    )
+
+    assert {diagnostic.code for diagnostic in reversed_join.errors} == {"potential_fanout"}
+    assert safe_direction.valid
+    assert preaggregated.valid
+
+
+def test_one_to_many_without_fanout_risk_cannot_be_published():
+    model = load_semantic_model(MODEL_PATH)
+    relationship = model.dataset_relationships[0]
+    relationship.cardinality = "one_to_many"
+    relationship.fanout_risk = False
+
+    result = validate_semantic_model(model)
+
+    assert {diagnostic.code for diagnostic in result.errors} >= {"missing_fanout_risk"}
+
+
+def test_multiple_join_paths_warn_without_blocking_a_single_path_model():
+    model = load_semantic_model(MODEL_PATH)
+    published = validate_semantic_model(model)
+    assert published.valid
+    assert not any(item.code == "ambiguous_join_path" for item in published.warnings)
+
+    model.dataset_relationships.append(
+        DatasetRelationship(
+            id="payment_staging_customer_staging",
+            source_dataset_id="payment_staging",
+            target_dataset_id="customer_staging",
+            source_fields=["order_id"],
+            target_fields=["customer_id"],
+            cardinality="many_to_one",
+            fanout_risk=True,
+            verification_status="profiled",
+        )
+    )
+
+    result = validate_semantic_model(model)
+
+    assert result.valid
+    warned = {item.object_id for item in result.warnings if item.code == "ambiguous_join_path"}
+    assert {"order_staging_customer_staging", "payment_staging_order_staging", "payment_staging_customer_staging"} <= warned
+
+
+def test_order_mart_has_no_direct_relationship_to_payment_staging():
+    result = validate_dataset_join(
+        load_semantic_model(MODEL_PATH),
+        "order_mart",
+        "payment_staging",
+        allowed_relationship_ids={"payment_staging_order_staging"},
+    )
+
+    assert {diagnostic.code for diagnostic in result.errors} == {"missing_relationship"}
 
 
 def test_model_validator_requires_many_to_many_relationships_to_disclose_fanout_risk():

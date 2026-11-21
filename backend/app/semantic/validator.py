@@ -53,9 +53,9 @@ def validate_semantic_model(
                                       "source_fields", diagnostics)
         _validate_relationship_fields(model, relationship.id, relationship.target_dataset_id, relationship.target_fields,
                                       "target_fields", diagnostics)
-        if relationship.cardinality == "many_to_many" and not relationship.fanout_risk:
+        if relationship.cardinality in {"many_to_many", "one_to_many"} and not relationship.fanout_risk:
             _error(diagnostics, relationship.id, "fanout_risk", "missing_fanout_risk",
-                   "A many-to-many relationship can multiply rows.", "Set fanout_risk to true and restrict its use.")
+                   "This cardinality can multiply rows.", "Set fanout_risk to true and restrict its use.")
 
     for dimension in model.dimensions:
         _validate_dimension_sources(model, dimension, dataset_ids, diagnostics)
@@ -141,16 +141,31 @@ def validate_dataset_join(
         return _result(diagnostics)
 
     relationship = selected[0]
-    if relationship.fanout_risk and not preaggregated_source:
+    # 已声明的 fanout_risk 在任一方向都拒绝。未声明时，从“一”侧连到“多”侧同样会放大源行。
+    if not preaggregated_source and (relationship.fanout_risk or _source_rows_multiply(relationship, source_dataset_id)):
+        code = "fanout_risk" if relationship.fanout_risk else "potential_fanout"
         _error(
             diagnostics,
             relationship.id,
             "fanout_risk",
-            "fanout_risk",
+            code,
             "This relationship can multiply source rows before aggregation.",
             "Pre-aggregate the source to its declared grain before joining.",
         )
     return _result(diagnostics)
+
+
+def _source_rows_multiply(relationship, source_dataset_id: str) -> bool:
+    """从调用方的源数据集出发，这一跳会不会把源行变成多行。"""
+    if relationship.cardinality == "many_to_many":
+        return True
+    if relationship.cardinality == "one_to_one":
+        return False
+    if relationship.cardinality == "many_to_one":
+        return source_dataset_id == relationship.target_dataset_id
+    if relationship.cardinality == "one_to_many":
+        return source_dataset_id == relationship.source_dataset_id
+    return False
 
 
 def _validate_unique_ids(model: SemanticModel, diagnostics: list[Diagnostic]) -> None:
@@ -355,16 +370,50 @@ def _validate_metric_cycles(metrics: list[Metric], diagnostics: list[Diagnostic]
 
 
 def _validate_ambiguous_paths(model: SemanticModel, diagnostics: list[Diagnostic]) -> None:
-    pairs: dict[tuple[str, str], list[str]] = {}
+    graph: dict[str, list[tuple[str, str]]] = {}
     for relationship in model.dataset_relationships:
-        key = tuple(sorted((relationship.source_dataset_id, relationship.target_dataset_id)))
-        pairs.setdefault(key, []).append(relationship.id)
-    for relationship_ids in pairs.values():
-        if len(relationship_ids) > 1:
-            for identifier in relationship_ids:
-                _warning(diagnostics, identifier, "priority", "ambiguous_join_path",
-                         "More than one declared relationship connects the same datasets.",
-                         "Assign a unique priority and authorize the intended path explicitly.")
+        graph.setdefault(relationship.source_dataset_id, []).append((relationship.target_dataset_id, relationship.id))
+        graph.setdefault(relationship.target_dataset_id, []).append((relationship.source_dataset_id, relationship.id))
+    warned: set[str] = set()
+    nodes = list(graph)
+    for index, start in enumerate(nodes):
+        for end in nodes[index + 1:]:
+            paths = _simple_paths(graph, start, end)
+            if len(paths) < 2:
+                continue
+            for path in paths:
+                for identifier in path:
+                    if identifier in warned:
+                        continue
+                    warned.add(identifier)
+                    _warning(
+                        diagnostics,
+                        identifier,
+                        "priority",
+                        "ambiguous_join_path",
+                        "More than one join path connects the same datasets.",
+                        "Assign a unique priority and authorize the intended path explicitly.",
+                    )
+
+
+def _simple_paths(graph: dict[str, list[tuple[str, str]]], start: str, end: str) -> list[list[str]]:
+    paths: list[list[str]] = []
+
+    def walk(node: str, visited: set[str], path: list[str]) -> None:
+        if node == end and path:
+            paths.append(list(path))
+            return
+        for neighbor, identifier in graph.get(node, []):
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            path.append(identifier)
+            walk(neighbor, visited, path)
+            path.pop()
+            visited.remove(neighbor)
+
+    walk(start, {start}, [])
+    return paths
 
 
 def _require_member(

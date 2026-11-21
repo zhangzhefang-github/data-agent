@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from app.query_scope import render_query_scope
 from app.semantic.context_builder import build_semantic_context
 from app.semantic.loader import load_semantic_model
 
@@ -37,6 +38,11 @@ def authorized_joins(root: Path) -> set[tuple[tuple[str, str], tuple[str, str]]]
             (physical[relationship.target_dataset_id], relationship.target_fields[0].lower()),
         ))))
     return keys
+
+
+def orders_query_scope(root: Path) -> str:
+    """订单主题空间的可查询范围。不按单次问题裁剪。"""
+    return render_query_scope(_orders_context(root))
 
 
 def render_direct_sql_prompt(root: Path, database: dict) -> str:
@@ -107,13 +113,19 @@ def render_direct_sql_prompt(root: Path, database: dict) -> str:
         f"授权维度：{dimensions}\n"
         f"状态字典：{values}\n"
         f"过滤规则：{context.business.filter_rules}\n"
+        "可查询范围（用户询问能查什么、有哪些数据或可以问什么时，只回复下面这段原文，不要调用工具，也不要改写。"
+        "示例问题只说明问法，其中的日期不要套用到用户没有说出的时间上）：\n"
+        f"{render_query_scope(context)}\n"
         "本次查询约束：直接查询本次授权的表，只提交一条 SELECT。"
         "不要使用 WITH、子查询、DISTINCT、QUALIFY、date_trunc，也不要模仿经典示例的这些写法。"
         "筛选和分组只能使用授权维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
         "有状态字典的维度在 WHERE 中使用字典里的字面量，不要用 CASE 翻译。"
         "维度列在 SELECT 和 GROUP BY 中必须使用授权维度的 column，不要另起别名。"
         "是否关联由问题决定，只使用授权关系中的等值内连接。"
+        "查询必须从订单表开始。统计客户数时按客户标识分组，并使用订单笔数，不要单独查询客户表，也不要对客户标识做 COUNT。"
         "指标表达式和结果别名必须与授权指标完全一致，不要相减或改写。"
+        "已发布订单指标的基础粒度是单笔订单。"
+        "支付明细未授权，不能把订单行和支付行连接后再汇总订单金额。"
     )
 
 

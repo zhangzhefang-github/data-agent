@@ -198,10 +198,26 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     model = _order_table(catalog)
     source = tree.args.get("from")
     table = source.this if source else None
-    if not _plain_table(table) or table.name.lower() != model["table"]:
+    if not _plain_table(table):
         raise SqlRejected("查询只允许访问已授权的订单表")
     table.set("db", exp.to_identifier("main"))
-    _authorize_joins(tree.args.get("joins") or [], table, set(joins))
+    query_joins = tree.args.get("joins") or []
+    if table.name.lower() != model["table"]:
+        # 客户表在前、订单表在后的已授权等值连接不是越权，但指标仍必须从订单表汇总。
+        try:
+            _authorize_joins(query_joins, table, set(joins))
+        except SqlRejected:
+            raise SqlRejected("查询只允许访问已授权的订单表") from None
+        if model["table"] not in {join.this.name.lower() for join in query_joins}:
+            if _is_authorized_partner(table.name.lower(), model["table"], joins):
+                raise SqlCorrection(
+                    "查询必须从订单表开始，客户表只能按客户标识做等值内连接。统计客户时按客户标识分组，并使用订单笔数。"
+                )
+            raise SqlRejected("查询只允许访问已授权的订单表")
+        raise SqlCorrection(
+            "查询必须从订单表开始，客户表只能按客户标识做等值内连接。统计客户时按客户标识分组，并使用订单笔数。"
+        )
+    _authorize_joins(query_joins, table, set(joins))
     qualifier = (table.alias or table.name).lower()
     dimensions = {item["column"]: item for item in catalog["dimensions"].values()}
     metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
@@ -219,6 +235,8 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
         else:
             matching = [metric for metric, expression in metrics.items() if _matches_metric(value, expression, qualifier)]
             if len(matching) != 1:
+                if _counts_customer_identifier(value):
+                    raise SqlCorrection("没有已发布的客户数。请从订单表按客户标识分组，并使用订单笔数。")
                 raise SqlRejected("查询包含未授权的指标或维度")
             missing_aliases.append(matching[0])
         columns.append(name)
@@ -267,6 +285,26 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
         cap = MAX_ROWS
     tree.set("limit", exp.Limit(expression=exp.Literal.number(cap)))
     return tree, columns, dates
+
+
+def _is_authorized_partner(table_name: str, order_table: str, allowed) -> bool:
+    return any(
+        table_name != order_table and order_table in {left[0], right[0]} and table_name in {left[0], right[0]}
+        for left, right in allowed
+    )
+
+
+def _counts_customer_identifier(value) -> bool:
+    if not isinstance(value, exp.Count):
+        return False
+    target = value.this
+    columns = target.expressions if isinstance(target, exp.Distinct) else [target]
+    return (
+        len(columns) == 1
+        and isinstance(columns[0], exp.Column)
+        and columns[0].name.lower() == "customer_id"
+        and _in_main(columns[0])
+    )
 
 
 def _matches_metric(value, expected, qualifier):

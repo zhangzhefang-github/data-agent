@@ -35,6 +35,7 @@ class SpaceDefinition(BaseModel):
     calendar: SpaceCalendar | None = None
     filter_rules: list[str] = Field(default_factory=list)
     sql_examples: list[str] = Field(default_factory=list)
+    example_questions: list[str] = Field(default_factory=list)
 
 
 class SpaceDefinitions(BaseModel):
@@ -100,6 +101,7 @@ class BusinessSemanticContext(BaseModel):
     calendar: SpaceCalendar | None = None
     filter_rules: list[str]
     sql_examples: list[str]
+    example_questions: list[str]
 
 
 class SqlSemanticContext(BaseModel):
@@ -214,6 +216,7 @@ def build_semantic_context(
             calendar=space.calendar,
             filter_rules=space.filter_rules,
             sql_examples=space.sql_examples,
+            example_questions=space.example_questions,
         ),
         sql=SqlSemanticContext(
             datasets=[

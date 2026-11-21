@@ -79,6 +79,7 @@ def test_orders_context_selects_authorized_terms_and_serializes_without_sensitiv
     assert [dataset.id for dataset in context.sql.datasets] == ["customer_mart", "order_mart"]
     assert [item.id for item in context.sql.relationships] == ["order_mart_customer_mart"]
     assert context.sql.relationships[0].fanout_risk is False
+    assert context.sql.relationships[0].join_type == "inner"
     assert context.business.metric_aliases == {"order_rows": "orders.order_count"}
     status = next(dimension for dimension in context.business.dimensions if dimension.id == "orders.status")
     assert status.allowed_values == {"已下单": "placed", "已发货": "shipped", "已完成": "completed", "退货中": "return_pending", "已退货": "returned"}

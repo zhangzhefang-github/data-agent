@@ -97,9 +97,18 @@ def order_chat(monkeypatch, tmp_path):
             assert "只能原样写 order_date" not in prompt
             assert "不要 JOIN" not in prompt
             assert "不要另起别名" in prompt
+            assert "不要单独查询客户表" in prompt
+            assert "可查询的数据范围" in prompt
+            assert "客户汇总" in prompt
+            assert "等值内连接" in prompt
+            assert "只回复下面这段原文" in prompt
+            assert "可查询范围原文" in agent.instructions
             assert "本次执行 SQL" in agent.instructions
             assert "第一季度是 1–3 月" in prompt
             assert "不要再与 amount 相加" in prompt
+            assert "基础粒度是单笔订单" in prompt
+            assert "支付明细未授权" in prompt
+            assert "order_id" not in prompt
             return Run()
 
         tool = None
@@ -200,7 +209,6 @@ def test_aliased_customer_order_join_keeps_order_count_and_amount(order_chat):
 @pytest.mark.parametrize("candidate", [
     HISTORICAL + "; SELECT 1",
     "DELETE FROM orders",
-    "SELECT COUNT(*) AS order_rows FROM customers",
     "SELECT COUNT(*) AS order_rows FROM orders JOIN customers ON TRUE",
     "SELECT COUNT(*) AS order_rows FROM orders LEFT JOIN customers ON orders.customer_id = customers.customer_id",
     "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id",
@@ -320,6 +328,52 @@ def test_direct_follow_up_keeps_last_success_after_failure_and_shifts_leap_day(o
     assert "2023-02-28" in events["result"]["sql"]
     assert after["messages"][1]["result"] == first["result"]
     assert after["last_query"]["mode"] == "orders_duckdb"
+
+
+@pytest.mark.parametrize("captured", [
+    "SELECT COUNT(customer.customer_id) AS customer_count FROM main.customers customer "
+    "INNER JOIN main.orders order_ ON customer.customer_id = order_.customer_id",
+    "SELECT COUNT(DISTINCT orders.customer_id) AS customer_count FROM main.orders "
+    "JOIN main.customers ON orders.customer_id = customers.customer_id",
+    "SELECT COUNT(customer_id) AS customer_count FROM main.customers",
+])
+def test_customer_count_shape_can_be_repaired_into_a_customer_grouping(order_chat, captured):
+    repaired = "SELECT customer_id, COUNT(*) AS order_rows FROM orders GROUP BY customer_id"
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [captured, repaired], "帮我查一下目前有多少客户")
+    assert "只允许访问已授权的订单表" not in replies[0]["error"]
+    assert "客户标识" in replies[0]["error"]
+    assert events["done"]["status"] == "completed"
+    assert events["result"]["columns"] == ["customer_id", "order_rows"]
+    assert "error" not in events
+
+
+def test_scope_question_returns_the_authorized_range_without_the_model(order_chat, monkeypatch):
+    def fail_runner(*args, **kwargs):
+        raise AssertionError("能力问题不应调用模型")
+
+    monkeypatch.setattr(main.Runner, "run_streamed", fail_runner)
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat/stream", json={"message": "请问我能查询哪些信息？"})
+        events = dict(
+            (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
+            for part in response.text.strip().split("\n\n")
+            for kind, data in [part.split("\n", 1)]
+        )
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+
+    text = events["text"]["delta"]
+    assert events["done"]["status"] == "completed"
+    assert "result" not in events
+    assert text.startswith("可查询的数据范围")
+    assert "订单汇总（orders）" in text
+    assert "客户汇总（customers）" in text
+    assert "等值内连接" in text
+    assert "某个日期区间的订单笔数和订单金额" in text
+    assert "first_name" not in text
+    assert "order_id" not in text
+    assert stored["messages"][1]["content"] == text
+    assert stored["messages"][1]["result"] is None
 
 
 def test_direct_follow_up_uses_prior_authorized_sql(order_chat):

@@ -167,7 +167,7 @@ dataset_lineage:
   - {id: customer_staging_to_mart, source_dataset_id: customer_staging, target_dataset_id: customer_mart, verification_status: proposed}
   - {id: order_staging_to_mart, source_dataset_id: order_staging, target_dataset_id: order_mart, verification_status: proposed}
 dataset_relationships:
-  - {id: order_mart_customer_mart, source_dataset_id: order_mart, target_dataset_id: customer_mart, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+  - {id: order_mart_customer_mart, source_dataset_id: order_mart, target_dataset_id: customer_mart, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, join_type: inner, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: order_staging_customer_staging, source_dataset_id: order_staging, target_dataset_id: customer_staging, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: order_source_customer_source, source_dataset_id: order_source, target_dataset_id: customer_source, source_fields: [user_id], target_fields: [id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: payment_staging_order_staging, source_dataset_id: payment_staging, target_dataset_id: order_staging, source_fields: [order_id], target_fields: [order_id], cardinality: many_to_one, fanout_risk: true, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
@@ -212,6 +212,7 @@ metrics:
     time_dimension_id: orders.order_date
     compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
+    synonyms: [信用卡, 支付金额]
     published: true
   - id: orders.coupon_amount
     name: 优惠券金额
@@ -222,6 +223,7 @@ metrics:
     time_dimension_id: orders.order_date
     compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
+    synonyms: [优惠券, 支付金额]
     published: true
   - id: orders.bank_transfer_amount
     name: 银行转账金额
@@ -232,6 +234,7 @@ metrics:
     time_dimension_id: orders.order_date
     compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
+    synonyms: [银行转账, 支付金额]
     published: true
   - id: orders.gift_card_amount
     name: 礼品卡金额
@@ -242,4 +245,5 @@ metrics:
     time_dimension_id: orders.order_date
     compatible_dimension_ids: [orders.order_date, orders.status, orders.customer_id]
     unit: source_amount
+    synonyms: [礼品卡, 支付金额]
     published: true
