@@ -43,6 +43,8 @@ def order_chat(monkeypatch, tmp_path):
         """)
         db.execute("CREATE TABLE customers (customer_id INTEGER)")
         db.execute("INSERT INTO customers VALUES (12), (13), (14), (15), (16), (17), (18), (19), (20)")
+        # 客户标识有值，但客户表没有这一行。不能把非空当成客户记录存在。
+        db.execute("INSERT INTO orders VALUES ('2016-06-01', 'placed', 1, 1, 0, 0, 0, 999)")
 
     class BusinessClock(datetime):
         @classmethod
@@ -71,7 +73,7 @@ def order_chat(monkeypatch, tmp_path):
         def runner(agent, prompt, **kwargs):
             nonlocal tool
             tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
-            assert not any(item.name == "execute_semantic_query" for item in agent.tools)
+            assert [item.name for item in agent.tools] == ["execute_direct_sql"]
             assert "方言版本：v" in prompt
             assert "sales_transactions" in prompt
             assert "WITH weekly_sales" not in prompt
@@ -89,6 +91,9 @@ def order_chat(monkeypatch, tmp_path):
             assert "'source': 'orders'" in relations
             assert "'target': 'customers'" in relations
             assert "many_to_one" in relations
+            assert "'join_type': 'inner'" in relations
+            assert "不会放大行数" in prompt
+            assert "INTEGER" in authorized
             assert "order_to_payment" not in relations
             assert "'id': 'order'" in objects
             assert "'id': 'customer'" in objects
@@ -135,7 +140,7 @@ JOINED = (
 @pytest.mark.parametrize(("sql", "columns", "rows"), [
     (HISTORICAL, ["order_rows", "order_amount"], [[3, 35.0]]),
     (JOINED, ["order_rows"], [[608]]),
-    (TOTALS, ["order_rows", "order_amount"], [[608, 940.0]]),
+    (TOTALS, ["order_rows", "order_amount"], [[609, 941.0]]),
     (TOTALS + " WHERE order_date = '2019-01-01'", ["order_rows", "order_amount"], []),
     (
         "SELECT status, SUM(credit_card_amount) AS credit_card_amount, SUM(coupon_amount) AS coupon_amount, "
@@ -386,3 +391,50 @@ def test_direct_follow_up_uses_prior_authorized_sql(order_chat):
     assert shifted["result"]["rows"] == [[1, 7.0]]
     assert "result" not in unconnected
     assert "请先提供" in unconnected["text"]["delta"]
+
+
+def test_customer_presence_requires_the_equijoin_and_keeps_the_prior_query(order_chat):
+    presence = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders "
+        "WHERE customer_id IS NOT NULL"
+    )
+    joined = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders "
+        "INNER JOIN customers ON orders.customer_id = customers.customer_id"
+    )
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        conversation_id = first["conversation"]["conversation_id"]
+        route = f"/api/conversations/{conversation_id}"
+        before = client.get(route).json()["last_query"]
+        rejected, replies = order_chat(client, [presence], conversation_id=conversation_id)
+        assert client.get(route).json()["last_query"] == before
+        events, repaired = order_chat(client, [presence, joined], conversation_id=conversation_id)
+    assert "等值内连接" in replies[0]["error"]
+    assert rejected["done"]["status"] == "failed"
+    assert "result" not in rejected
+    assert repaired[0]["remaining_repairs"] == 2
+    assert events["result"]["rows"] == [[608, 940.0]]
+
+
+def test_joined_customer_identifier_groups_without_fanout_and_names_the_top_customer(order_chat):
+    grouped = (
+        "SELECT c.customer_id, COUNT(*) AS order_rows, SUM(o.amount) AS order_amount "
+        "FROM orders AS o INNER JOIN customers AS c ON o.customer_id = c.customer_id "
+        "GROUP BY c.customer_id"
+    )
+    top = (
+        "SELECT c.customer_id, SUM(o.amount) AS order_amount "
+        "FROM orders AS o INNER JOIN customers AS c ON o.customer_id = c.customer_id "
+        "GROUP BY c.customer_id ORDER BY order_amount DESC LIMIT 1"
+    )
+    with TestClient(main.app) as client:
+        grouped_events, _ = order_chat(client, [grouped])
+        top_events, _ = order_chat(client, [top])
+    rows = grouped_events["result"]["rows"]
+    assert sum(row[1] for row in rows) == 608
+    assert sum(row[2] for row in rows) == 940.0
+    assert all(row[0] != 999 for row in rows)
+    assert top_events["result"]["rows"] == [[20, 600.0]]
+    assert "first_name" not in top_events["result"]["sql"]
+    assert "last_name" not in top_events["result"]["sql"]

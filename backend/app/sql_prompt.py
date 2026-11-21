@@ -5,8 +5,7 @@ from pathlib import Path
 import yaml
 
 from app.query_scope import render_query_scope
-from app.semantic.context_builder import build_semantic_context
-from app.semantic.loader import load_semantic_model
+from app.semantic.context_builder import SemanticContext, build_semantic_context
 
 
 def load_dialect(root: Path) -> dict:
@@ -26,16 +25,22 @@ def authorized_tables(root: Path) -> list[tuple[str, set[str]]]:
 
 
 def authorized_joins(root: Path) -> set[tuple[tuple[str, str], tuple[str, str]]]:
-    """已授权、且不会放大行数的等值连接。键是排序后的 (物理表, 字段) 对。"""
-    model = load_semantic_model(root / "backend" / "configs" / "semantic" / "jaffle_shop.yaml")
-    physical = {dataset.id: dataset.physical_mapping.object_name.lower() for dataset in model.datasets}
+    """已授权、且不会放大行数的等值连接。键是排序后的 (物理表, 物理列) 对。"""
+    return _authorized_joins(_orders_context(root))
+
+
+def _authorized_joins(context: SemanticContext) -> set[tuple[tuple[str, str], tuple[str, str]]]:
+    columns = {dataset.id: dataset.columns for dataset in context.sql.datasets}
+    physical = {dataset.id: dataset.physical_object.lower() for dataset in context.sql.datasets}
     keys = set()
-    for relationship in _orders_context(root).sql.relationships:
+    for relationship in context.sql.relationships:
         if len(relationship.source_fields) != 1 or len(relationship.target_fields) != 1:
             continue
+        source_column = columns[relationship.source_dataset_id][relationship.source_fields[0]].lower()
+        target_column = columns[relationship.target_dataset_id][relationship.target_fields[0]].lower()
         keys.add(tuple(sorted((
-            (physical[relationship.source_dataset_id], relationship.source_fields[0].lower()),
-            (physical[relationship.target_dataset_id], relationship.target_fields[0].lower()),
+            (physical[relationship.source_dataset_id], source_column),
+            (physical[relationship.target_dataset_id], target_column),
         ))))
     return keys
 
@@ -83,20 +88,16 @@ def render_direct_sql_prompt(root: Path, database: dict) -> str:
     ]
     example = "\n".join(item["sql"].strip() for item in dialect["examples"])
     rules = "\n".join(f"- {rule}" for rule in dialect["rules"])
-    physical = {
-        dataset.id: dataset.physical_mapping.object_name
-        for dataset in load_semantic_model(
-            root / "backend" / "configs" / "semantic" / "jaffle_shop.yaml"
-        ).datasets
-    }
+    physical = {dataset.id: dataset.physical_object for dataset in context.sql.datasets}
     relationships = [
         {
             "id": item.id,
             "source": physical[item.source_dataset_id],
-            "source_fields": item.source_fields,
+            "source_fields": [columns_by_dataset[item.source_dataset_id][field] for field in item.source_fields],
             "target": physical[item.target_dataset_id],
-            "target_fields": item.target_fields,
+            "target_fields": [columns_by_dataset[item.target_dataset_id][field] for field in item.target_fields],
             "cardinality": item.cardinality,
+            "join_type": item.join_type,
             "fanout_risk": item.fanout_risk,
         }
         for item in context.sql.relationships

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from app.query import DataSource, Query, execute_query
+from app.query import DataSource, Query, execute_query, load_catalog
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_city_totals_include_current_year_only(tmp_path: Path):
@@ -166,8 +168,6 @@ def test_database_locator_prefers_postgres_then_duckdb(tmp_path: Path):
 
 
 def test_orders_space_counts_rows_and_sums_amount(tmp_path: Path):
-    import yaml
-
     path = tmp_path / "orders.db"
     with sqlite3.connect(path) as db:
         db.execute("CREATE TABLE orders (order_date TEXT, status TEXT, amount INTEGER, credit_card_amount INTEGER, coupon_amount INTEGER, bank_transfer_amount INTEGER, gift_card_amount INTEGER)")
@@ -176,7 +176,7 @@ def test_orders_space_counts_rows_and_sums_amount(tmp_path: Path):
             ("2026-03-01", "returned", 5, 0, 5, 0, 0),
             ("2025-12-31", "completed", 100, 100, 0, 0, 0),
         ])
-    catalog = yaml.safe_load((Path(__file__).parents[1] / "configs" / "orders_space.yaml").read_text())["space"]
+    catalog = load_catalog(ROOT, "orders")
     result = execute_query(path, Query(metrics=["order_rows", "order_amount"], dimensions=["status"]), date(2026, 6, 1), catalog)
     assert result["rows"] == [["completed", 1, 10], ["returned", 1, 5]]
     assert "COUNT(*)" in result["sql"]
@@ -238,12 +238,12 @@ def test_postgres_query_is_schema_qualified_bound_and_read_only(monkeypatch, tmp
 
 
 def test_orders_instructions_follow_the_catalog():
-    import yaml
     from app.query import space_instructions
 
-    catalog = yaml.safe_load((Path(__file__).parents[1] / "configs" / "orders_space.yaml").read_text())["space"]
+    catalog = load_catalog(ROOT, "orders")
     text = space_instructions(catalog)
     assert "订单金额" in text
     assert "订单状态" in text
+    assert "客户标识" in text
     assert "门店" not in text
     assert "城市" not in text

@@ -33,3 +33,9 @@
 2026-11-21，问「总金额、总笔数和平均订单金额」时，模型提交的 `SUM(amount) / COUNT(*)` 未对上已发布指标，整句被拒绝。见 [平均订单金额被整句拒绝](average-order-amount.md)。
 
 2026-11-21 晚间，上面「改动尚未提交」的说法被 `data-agent-direct-sql@c9bbcc6` 取代。授权放宽之后，用真实模型重跑了同一六题。六题 `done` 都是 `completed`，`source` 为 DuckDB，行与放宽前的独立查库一致：99 笔、1672.0；按状态五行与上一段相同；已完成为 67 笔、1103.0；四种支付为 871.0、185.0、411.0、205.0；2019-01-01 为空。第 4 题 SQL 为 2017-01-01 至 2017-04-09，结果为空。该题中文解释在同日多次把日期说成 2025-11-21 或再减一年的 2016 区间；提示改为原样复述服务已经平移的日期后，解释写成 2017-01-01 至 2017-04-09。这六题的 SQL 都没有访问支付表。
+
+## 2026-11-21 本仓库收尾
+
+上文把订单 Direct SQL 的工程位置写在 `/home/zzf/data-agent-direct-sql`。该说法被本仓库 `main` 在 `f6043af` 之上的收尾取代：订单主题空间连接 DuckDB 时，默认路径在本仓库，为 Semantic Model → Semantic Context → 模型生成原生 SQL → SQL Validator → DuckDB 只读执行。DuckDB 是订单的开发、运行和验收数据库。SQLite 与 PostgreSQL 保留兼容。Query IR 和 Compiler 保留，订单 DuckDB 默认路径不退回结构化查询。
+
+同日注入 SQL 的三道客户题结果见 [客户–订单授权上下文](customer-order-context.md)。真实模型本轮没有重跑。

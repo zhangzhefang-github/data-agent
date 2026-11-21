@@ -7,7 +7,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from app.direct_sql import SqlRejected, execute_order_sql
+from app.direct_sql import SqlCorrection, SqlRejected, execute_order_sql
 from app.query import load_catalog, question_catalog
 from app.sql_prompt import authorized_joins
 
@@ -107,6 +107,151 @@ def test_direct_sql_matches_independent_totals_status_and_payment_amounts(jaffle
     assert len(by_customer["rows"]) == 62
     assert sum(row[1] for row in by_customer["rows"]) == 99
     assert sum(row[2] for row in by_customer["rows"]) == 1672.0
+    assert jaffle_shop_path.read_bytes() == before
+
+
+def test_customer_questions_match_the_reviewed_window(jaffle_shop_path: Path):
+    window = "order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'"
+    before = jaffle_shop_path.read_bytes()
+    joined = _run(
+        jaffle_shop_path,
+        f"""
+        SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+        FROM orders
+        INNER JOIN customers ON orders.customer_id = customers.customer_id
+        WHERE {window}
+        """,
+    )
+    grouped = _run(
+        jaffle_shop_path,
+        f"""
+        SELECT customer_id, COUNT(*) AS order_rows
+        FROM orders
+        WHERE {window}
+        GROUP BY customer_id
+        """,
+    )
+    top = _run(
+        jaffle_shop_path,
+        f"""
+        SELECT customer_id, SUM(amount) AS order_amount
+        FROM orders
+        WHERE {window}
+        GROUP BY customer_id
+        ORDER BY order_amount DESC
+        LIMIT 1
+        """,
+    )
+
+    assert joined["rows"] == [[99, 1672.0]]
+    assert "JOIN" in joined["sql"].upper()
+    assert len(grouped["rows"]) == 62
+    assert sum(row[1] for row in grouped["rows"]) == 99
+    assert top["rows"] == [[51, 99.0]]
+    assert "first_name" not in top["sql"]
+    assert "last_name" not in top["sql"]
+    with pytest.raises(SqlCorrection, match="等值内连接"):
+        _run(
+            jaffle_shop_path,
+            f"""
+            SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+            FROM orders
+            WHERE customer_id IS NOT NULL AND {window}
+            """,
+        )
+    assert jaffle_shop_path.read_bytes() == before
+
+
+def test_reviewed_window_is_accepted_at_the_order_chat_entry(monkeypatch, tmp_path, jaffle_shop_path: Path):
+    import json
+    from types import SimpleNamespace
+
+    from agents.tool_context import ToolContext
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    before = jaffle_shop_path.read_bytes()
+    monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
+    monkeypatch.setattr(main, "CATALOG", load_catalog(ROOT, "orders"))
+    monkeypatch.setattr(main, "DUCKDB_PATH", str(jaffle_shop_path))
+    monkeypatch.setattr(main, "DATABASE_URL", None)
+    questions = [
+        (
+            "有客户记录的订单笔数和订单金额是多少？请看 2018-01-01 至 2018-04-09。",
+            """
+            SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+            FROM orders
+            INNER JOIN customers ON orders.customer_id = customers.customer_id
+            WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+            """,
+            [[99, 1672.0]],
+        ),
+        (
+            "每个客户各有多少笔订单？请看 2018-01-01 至 2018-04-09。",
+            """
+            SELECT customer_id, COUNT(*) AS order_rows
+            FROM orders
+            WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+            GROUP BY customer_id
+            """,
+            None,
+        ),
+        (
+            "订单金额最高的客户是谁？请看 2018-01-01 至 2018-04-09。",
+            """
+            SELECT customer_id, SUM(amount) AS order_amount
+            FROM orders
+            WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+            GROUP BY customer_id
+            ORDER BY order_amount DESC
+            LIMIT 1
+            """,
+            [[51, 99.0]],
+        ),
+    ]
+
+    def ask(client, sql, message):
+        class Run:
+            async def stream_events(self):
+                arguments = json.dumps({"sql": sql})
+                context = ToolContext(None, tool_name=tool.name, tool_call_id="1", tool_arguments=arguments)
+                await tool.on_invoke_tool(context, arguments)
+                yield SimpleNamespace(type="raw_response_event", data=SimpleNamespace(
+                    type="response.output_text.delta", delta="完成",
+                ))
+
+        def runner(agent, prompt, **kwargs):
+            nonlocal tool
+            tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
+            assert [item.name for item in agent.tools] == ["execute_direct_sql"]
+            assert "'id': 'customer'" in prompt
+            assert "不会放大行数" in prompt
+            assert "first_name" not in prompt
+            assert "order_to_payment" not in prompt
+            return Run()
+
+        tool = None
+        monkeypatch.setattr(main.Runner, "run_streamed", runner)
+        response = client.post("/api/chat/stream", json={"message": message})
+        assert response.status_code == 200
+        return dict(
+            (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
+            for part in response.text.strip().split("\n\n")
+            for kind, data in [part.split("\n", 1)]
+        )
+
+    with TestClient(main.app) as client:
+        joined, grouped, top = (ask(client, sql, message) for message, sql, _ in questions)
+    assert joined["done"]["status"] == "completed"
+    assert joined["result"]["rows"] == questions[0][2]
+    assert "JOIN" in joined["result"]["sql"].upper()
+    assert grouped["done"]["status"] == "completed"
+    assert len(grouped["result"]["rows"]) == 62
+    assert sum(row[1] for row in grouped["result"]["rows"]) == 99
+    assert top["done"]["status"] == "completed"
+    assert top["result"]["rows"] == questions[2][2]
+    assert "first_name" not in top["result"]["sql"]
     assert jaffle_shop_path.read_bytes() == before
 
 

@@ -73,6 +73,8 @@ class BusinessRelationship(BaseModel):
     target_object_id: str
     cardinality: Literal["one_to_one", "one_to_many", "many_to_many"]
     verification_status: VerificationStatus
+    # 一条业务关系可以落到一条或多条数据集 JOIN。授权仍由主题空间决定。
+    dataset_relationship_ids: list[str] = Field(default_factory=list)
     description: str = ""
 
 

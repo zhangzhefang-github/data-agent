@@ -32,11 +32,16 @@ def validate_semantic_model(
         _require_members(business_object.id, "dataset_ids", business_object.dataset_ids, dataset_ids,
                          "unknown_dataset", diagnostics)
 
+    objects_by_id = {item.id: item for item in model.business_objects}
+    dataset_relationships = {item.id: item for item in model.dataset_relationships}
     for relationship in model.business_relationships:
         _require_member(relationship.id, "source_object_id", relationship.source_object_id, object_ids,
                         "unknown_business_object", diagnostics)
         _require_member(relationship.id, "target_object_id", relationship.target_object_id, object_ids,
                         "unknown_business_object", diagnostics)
+        _validate_business_relationship_joins(
+            relationship, objects_by_id, dataset_relationships, diagnostics
+        )
 
     for record in model.dataset_lineage:
         _require_member(record.id, "source_dataset_id", record.source_dataset_id, dataset_ids,
@@ -153,6 +158,35 @@ def validate_dataset_join(
             "Pre-aggregate the source to its declared grain before joining.",
         )
     return _result(diagnostics)
+
+
+def _validate_business_relationship_joins(relationship, objects_by_id, dataset_relationships, diagnostics) -> None:
+    """业务关系只引用两端业务对象所拥有数据集之间的 JOIN。"""
+    source = objects_by_id.get(relationship.source_object_id)
+    target = objects_by_id.get(relationship.target_object_id)
+    owned = set(source.dataset_ids) | set(target.dataset_ids) if source and target else set()
+    for identifier in relationship.dataset_relationship_ids:
+        mapped = dataset_relationships.get(identifier)
+        if mapped is None:
+            _error(
+                diagnostics,
+                relationship.id,
+                "dataset_relationship_ids",
+                "unknown_dataset_relationship",
+                "A business relationship cites a dataset relationship that does not exist.",
+                "Use the ID of a declared dataset relationship, or remove the citation.",
+            )
+            continue
+        endpoints = {mapped.source_dataset_id, mapped.target_dataset_id}
+        if owned and not endpoints <= owned:
+            _error(
+                diagnostics,
+                relationship.id,
+                "dataset_relationship_ids",
+                "unrelated_dataset_relationship",
+                "A business relationship can only cite joins between its two business objects.",
+                "Move the join to the business relationship that owns both datasets.",
+            )
 
 
 def _source_rows_multiply(relationship, source_dataset_id: str) -> bool:

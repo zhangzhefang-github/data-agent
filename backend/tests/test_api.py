@@ -215,6 +215,9 @@ def test_orders_catalog_tool_returns_the_question_context(monkeypatch, tmp_path)
 
     monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
     monkeypatch.setattr(main, "CATALOG", load_catalog(main.ROOT, "orders"))
+    # 这两项核对的是未切到 DuckDB 时的结构化目录，不跟随本机的 DuckDB 配置。
+    monkeypatch.setattr(main, "DUCKDB_PATH", None)
+    monkeypatch.setattr(main, "DATABASE_URL", None)
     catalogs = []
 
     class Reply:
@@ -248,6 +251,8 @@ def test_orders_space_normalizes_canonical_query_ids_before_saving_history(monke
 
     monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
     monkeypatch.setattr(main, "CATALOG", load_catalog(main.ROOT, "orders"))
+    monkeypatch.setattr(main, "DUCKDB_PATH", None)
+    monkeypatch.setattr(main, "DATABASE_URL", None)
     submitted = []
 
     def fake_execute(path, plan, today, catalog=None, source=None):

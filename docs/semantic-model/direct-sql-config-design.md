@@ -6,9 +6,9 @@ Direct SQL 的执行器不写死表名。表会变，配置清单跟着变。方
 | --- | --- | --- |
 | 方言 `backend/configs/sql_dialects/duckdb.yaml` | 数据库版本不变就不改 | 版本前缀、该版本的 SQL 写法、一条经典示例 |
 | 空间 `backend/configs/semantic/spaces.yaml` | 加表、加关系时改 | 这个空间授权哪些数据集、哪些关系 |
-| 语义模型 `backend/configs/semantic/jaffle_shop.yaml` | 已有，本设计不改结构 | 全部数据集、物理表、指标、维度、关系证据 |
+| 语义模型 `backend/configs/semantic/jaffle_shop.yaml` | 已有 | 全部数据集、物理表、指标、维度、关系证据。2026-11-21 起，业务关系可以用 `dataset_relationship_ids` 指向一条或多条数据集 JOIN |
 
-`orders_space.yaml` 继续只服务结构化 Query IR。Direct SQL 的表清单不以它为准。
+2026-11-21 起，订单主题空间的运行时目录由已发布规范语义模型投影，不再读取 `orders_space.yaml`。销售主题空间仍读取 `sales_space.yaml`。Direct SQL 的表清单、连接和提示使用同一次订单空间投影。
 
 ## 方言
 

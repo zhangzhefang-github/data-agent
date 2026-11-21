@@ -101,12 +101,19 @@ def _date_literal(node) -> exp.Literal:
     return node
 
 
-def _filter_dates(node, dimensions, qualifier) -> list[exp.Literal]:
+def _filter_dates(node, dimensions, dimension_column) -> list[exp.Literal]:
+    # IS NOT NULL 会被解析成 Not(Is)，不能把它展开成普通筛选。
+    if isinstance(node, exp.Not) and isinstance(node.this, exp.Is):
+        node = node.this
+    if isinstance(node, exp.Is):
+        if dimension_column(node.this, dimensions) and node.this.name.lower() == "customer_id":
+            raise SqlCorrection("客户记录是否存在要用已授权的等值内连接，不要用客户标识是否为空代替。")
+        raise SqlRejected("查询筛选限于已授权维度")
     if isinstance(node, (exp.And, exp.Or)):
-        return _filter_dates(node.left, dimensions, qualifier) + _filter_dates(node.right, dimensions, qualifier)
+        return _filter_dates(node.left, dimensions, dimension_column) + _filter_dates(node.right, dimensions, dimension_column)
     if isinstance(node, (exp.Paren, exp.Not)):
-        return _filter_dates(node.this, dimensions, qualifier)
-    if not isinstance(node, (*COMPARISONS, exp.Between, exp.In)) or not _column(node.this, dimensions, qualifier):
+        return _filter_dates(node.this, dimensions, dimension_column)
+    if not isinstance(node, (*COMPARISONS, exp.Between, exp.In)) or not dimension_column(node.this, dimensions):
         raise SqlRejected("查询筛选限于已授权维度")
     field = node.this.name.lower()
     if isinstance(node, exp.Between):
@@ -155,7 +162,7 @@ def _equijoin_columns(node) -> tuple[tuple[str, str], tuple[str, str]]:
     return columns[0], columns[1]
 
 
-def _authorize_joins(joins, base: exp.Table, allowed: set[tuple[tuple[str, str], tuple[str, str]]]) -> None:
+def _authorize_joins(joins, base: exp.Table, allowed: set[tuple[tuple[str, str], tuple[str, str]]]) -> dict[str, str]:
     known = {base.name.lower()}
     aliases = {(base.alias or base.name).lower(): base.name.lower()}
     for join in joins:
@@ -178,6 +185,26 @@ def _authorize_joins(joins, base: exp.Table, allowed: set[tuple[tuple[str, str],
             raise SqlRejected("查询包含未授权的表关联")
         known.add(name)
         aliases[(target.alias or target.name).lower()] = name
+    return aliases
+
+
+def _join_keys_by_table(allowed) -> dict[str, set[str]]:
+    keys: dict[str, set[str]] = {}
+    for left, right in allowed:
+        keys.setdefault(left[0], set()).add(left[1])
+        keys.setdefault(right[0], set()).add(right[1])
+    return keys
+
+
+def _dimension_column(node, names, qualifier: str, aliases: dict[str, str], anchor: str, join_keys: dict[str, set[str]]) -> bool:
+    """订单表上的维度，以及已授权连接里对侧的同名连接键，都可以筛选和分组。"""
+    if not isinstance(node, exp.Column) or not _in_main(node) or node.name.lower() not in names:
+        return False
+    table = node.table.lower()
+    if table in {"", qualifier}:
+        return True
+    physical = aliases.get(table)
+    return bool(physical and physical != anchor and node.name.lower() in join_keys.get(physical, ()))
 
 
 def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
@@ -217,9 +244,15 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
         raise SqlCorrection(
             "查询必须从订单表开始，客户表只能按客户标识做等值内连接。统计客户时按客户标识分组，并使用订单笔数。"
         )
-    _authorize_joins(query_joins, table, set(joins))
+    aliases = _authorize_joins(query_joins, table, set(joins))
     qualifier = (table.alias or table.name).lower()
+    anchor = table.name.lower()
+    join_keys = _join_keys_by_table(joins)
     dimensions = {item["column"]: item for item in catalog["dimensions"].values()}
+
+    def dimension_column(node, names) -> bool:
+        return _dimension_column(node, names, qualifier, aliases, anchor, join_keys)
+
     metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
     columns = []
     grouped = []
@@ -227,7 +260,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     for selection in tree.expressions:
         name = selection.alias_or_name.lower()
         value = selection.this if isinstance(selection, exp.Alias) else selection
-        if _column(value, dimensions, qualifier) and name == value.name.lower():
+        if dimension_column(value, dimensions) and name == value.name.lower():
             grouped.append(name)
         elif name in metrics:
             if not _matches_metric(value, metrics[name], qualifier):
@@ -248,7 +281,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     if group and any(value for key, value in group.args.items() if key != "expressions"):
         raise SqlRejected("仅支持按获准维度分组")
     keys = group.expressions if group else []
-    if (any(not _column(key, dimensions, qualifier) for key in keys)
+    if (any(not dimension_column(key, dimensions) for key in keys)
             or {key.name.lower() for key in keys} != set(grouped)):
         raise SqlCorrection("分组字段必须与输出维度一致")
     order = tree.args.get("order")
@@ -257,7 +290,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
             value = item.this
             if isinstance(value, exp.Literal) and value.is_int and 1 <= int(value.this) <= len(columns):
                 continue
-            if _column(value, set(columns)) or _column(value, set(grouped), qualifier):
+            if _column(value, set(columns)) or dimension_column(value, set(grouped)):
                 name = value.name.lower()
             else:
                 name = next((name for name in columns if name in metrics and _matches_metric(
@@ -267,7 +300,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
                 raise SqlRejected("排序限于已选择的指标及维度")
             item.set("this", exp.Literal.number(columns.index(name) + 1))
     where = tree.args.get("where")
-    dates = _filter_dates(where.this, dimensions, qualifier) if where else []
+    dates = _filter_dates(where.this, dimensions, dimension_column) if where else []
     having = tree.args.get("having")
     count_matches = having and isinstance(having.this, exp.GT) and _matches_metric(
         having.this.left, parse_one("COUNT(*)"), qualifier) and having.this.right == exp.Literal.number(0)

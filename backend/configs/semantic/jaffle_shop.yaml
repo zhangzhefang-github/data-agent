@@ -44,8 +44,18 @@ business_objects:
       - {id: payment_method, name: 支付方式, data_type: string}
       - {id: amount, name: 支付金额, data_type: decimal}
 business_relationships:
-  - {id: customer_to_order, source_object_id: customer, target_object_id: order, cardinality: one_to_many, verification_status: proposed}
-  - {id: order_to_payment, source_object_id: order, target_object_id: payment, cardinality: one_to_many, verification_status: proposed}
+  - id: customer_to_order
+    source_object_id: customer
+    target_object_id: order
+    cardinality: one_to_many
+    verification_status: proposed
+    dataset_relationship_ids: [order_mart_customer_mart, order_staging_customer_staging, order_source_customer_source]
+  - id: order_to_payment
+    source_object_id: order
+    target_object_id: payment
+    cardinality: one_to_many
+    verification_status: proposed
+    dataset_relationship_ids: [payment_staging_order_staging, payment_source_order_source]
 datasets:
   - id: customer_mart
     name: 客户汇总

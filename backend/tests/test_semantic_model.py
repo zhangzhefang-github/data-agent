@@ -98,6 +98,36 @@ def test_published_model_marks_mart_lineage_proposed_not_confirmed():
     }
 
 
+def test_business_relationship_maps_only_to_joins_of_its_objects():
+    model = load_semantic_model(MODEL_PATH)
+    customer_order = next(item for item in model.business_relationships if item.id == "customer_to_order")
+    order_payment = next(item for item in model.business_relationships if item.id == "order_to_payment")
+
+    assert customer_order.dataset_relationship_ids == [
+        "order_mart_customer_mart",
+        "order_staging_customer_staging",
+        "order_source_customer_source",
+    ]
+    assert order_payment.dataset_relationship_ids == [
+        "payment_staging_order_staging",
+        "payment_source_order_source",
+    ]
+    assert validate_semantic_model(model).valid
+
+    customer_order.dataset_relationship_ids = ["payment_staging_order_staging"]
+    unrelated = validate_semantic_model(model)
+    assert {(item.object_id, item.code) for item in unrelated.errors} == {
+        ("customer_to_order", "unrelated_dataset_relationship")
+    }
+    customer_order.dataset_relationship_ids = ["missing_join"]
+    missing = validate_semantic_model(model)
+    assert {(item.object_id, item.code) for item in missing.errors} == {
+        ("customer_to_order", "unknown_dataset_relationship")
+    }
+    with pytest.raises(ValueError, match="not published"):
+        SemanticModelRegistry().publish(model)
+
+
 def test_loads_and_publishes_the_real_jaffle_shop_semantic_model(monkeypatch):
     model = load_semantic_model(MODEL_PATH)
     result = validate_semantic_model(model)

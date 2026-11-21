@@ -261,7 +261,8 @@ async def chat(request: ChatRequest):
                     "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
                     "用户询问可查询范围时，只回复提示中的可查询范围原文，不要调用工具。"
                 )
-                tools = [get_semantic_catalog, resolve_business_terms, execute_direct_sql]
+                # 订单 Direct SQL 只保留执行器。目录工具会按问题裁剪授权，和本次提示不是同一份范围。
+                tools = [execute_direct_sql]
                 prompt += "\n" + render_direct_sql_prompt(ROOT, database)
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
