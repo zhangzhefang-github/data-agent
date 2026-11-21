@@ -71,10 +71,12 @@ def order_chat(monkeypatch, tmp_path):
             nonlocal tool
             tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
             assert not any(item.name == "execute_semantic_query" for item in agent.tools)
-            assert '"engine": "DuckDB"' in prompt
-            assert '"version": "v' in prompt
-            assert '"sql_example":' in prompt
-            assert 'customer_id' not in prompt
+            assert "方言版本：v" in prompt
+            assert "GROUP BY ALL" in prompt
+            assert "本次授权的表：" in prompt
+            authorized = prompt.split("本次授权的表：", 1)[1].split("授权关系：", 1)[0]
+            assert "main.orders" in authorized
+            assert "customer_id" not in authorized
             return Run()
 
         tool = None

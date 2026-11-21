@@ -14,7 +14,6 @@ from app.query import physical_value
 
 MAX_ROWS = 500
 QUERY_TIMEOUT = 5
-SAMPLE = "SELECT COUNT(*) AS order_rows FROM main.orders WHERE order_date BETWEEN '2018-01-01' AND '2018-04-09'"
 COMPARISONS = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)
 
 
@@ -63,15 +62,18 @@ def _require_order_table(db):
         raise SqlRejected("订单数据源必须为本地订单表")
 
 
-def order_database_context(path: Path, catalog: dict) -> dict:
-    allowed = set(_order_table(catalog)["columns"])
+def order_database_context(path: Path, tables: list[tuple[str, set[str]]]) -> dict:
+    described = {}
     with _connect(path) as db:
-        _require_order_table(db)
         version = db.execute("SELECT version()").fetchone()[0]
-        columns = _fetch(db, "DESCRIBE main.orders")
-        exposed = {name: kind for name, kind, *_ in columns if name in allowed}
-        _fetch(db, SAMPLE)
-    return {"engine": "DuckDB", "version": version, "table": "main.orders", "columns": exposed, "sql_example": SAMPLE}
+        for table, allowed in tables:
+            if not table.isidentifier():
+                raise SqlRejected("授权表名不合法")
+            columns = _fetch(db, f"DESCRIBE main.{table}")
+            described[f"main.{table}"] = {name: kind for name, kind, *_ in columns if name in allowed}
+            if set(described[f"main.{table}"]) != allowed:
+                raise SqlRejected("授权列在数据库中不存在")
+    return {"version": version, "tables": described}
 
 
 def _column(node, names, qualifier=""):

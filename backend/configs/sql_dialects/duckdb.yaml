@@ -1,0 +1,24 @@
+engine: duckdb
+version: "v1."
+rules:
+  - 日期写成 DATE 'YYYY-MM-DD'。
+  - 分组使用 GROUP BY ALL。
+  - 子表粒度更细时，先在子查询中按主表键汇总，再关联主表。
+examples:
+  - sql: >
+      WITH payment_totals AS (
+        SELECT order_id, SUM(amount) AS payment_amount
+        FROM main.payments
+        GROUP BY ALL
+      )
+      SELECT
+        c.region,
+        SUM(o.amount) AS order_amount,
+        SUM(p.payment_amount) AS payment_amount
+      FROM main.orders AS o
+      JOIN main.customers AS c ON o.customer_id = c.customer_id
+      JOIN payment_totals AS p ON p.order_id = o.order_id
+      WHERE o.order_date BETWEEN DATE '2024-01-01' AND DATE '2024-03-31'
+      GROUP BY ALL
+      ORDER BY order_amount DESC
+      LIMIT 10

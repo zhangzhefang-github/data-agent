@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from app.demo import initialize
 from app import conversations
 from app.direct_sql import SqlCorrection, SqlRejected, SqlTimeout, execute_order_sql, order_database_context, prior_order_sql
+from app.sql_prompt import authorized_tables, render_direct_sql_prompt
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
@@ -231,22 +232,19 @@ async def chat(request: ChatRequest):
             instructions = space_instructions(CATALOG)
             run_options = {}
             if direct_sql:
-                database = await asyncio.to_thread(order_database_context, Path(source.location), CATALOG)
+                database = await asyncio.to_thread(
+                    order_database_context, Path(source.location), authorized_tables(ROOT),
+                )
                 instructions = (
-                    "你是订单主题空间助手。用 execute_direct_sql 提交一条 DuckDB SELECT，"
-                    "只访问 main.orders。使用授权指标中指定的表达式和结果列别名。"
-                    "维度使用原有列名。支持订单日期与订单状态字面量筛选、分组、排序和 LIMIT。"
+                    "你是订单主题空间助手。用 execute_direct_sql 提交 DuckDB SQL。"
+                    "只使用本次授权的表和列，以及授权指标的表达式和结果别名。"
+                    "经典示例只说明方言写法，示例中的表不代表已经授权。"
                     "无日期条件时服务默认今年截至今天。需要历史窗口时在 WHERE 写出正确日期。"
-                    "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
+                    "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释，日期以结果 SQL 为准。"
                     "针对去年同期，调用工具提交服务提供的同期 SQL。"
                 )
                 tools = [get_semantic_catalog, resolve_business_terms, execute_direct_sql]
-                prompt += f"\n授权数据库上下文：{json.dumps(database, ensure_ascii=False)}"
-                metrics = {
-                    name: {"name": metric["name"], "expression": metric["expression"]}
-                    for name, metric in CATALOG["metrics"].items()
-                }
-                prompt += f"\n授权指标（键为 SQL 结果列别名）：{json.dumps(metrics, ensure_ascii=False)}"
+                prompt += "\n" + render_direct_sql_prompt(ROOT, database)
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
                 run_options["max_turns"] = 8
