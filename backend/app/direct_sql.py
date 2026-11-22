@@ -320,6 +320,28 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     return tree, columns, dates
 
 
+def context_coverage_gap(sql: str, authorization, presentation) -> list[str]:
+    """已授权但本次提示没展开的数据集。未授权表不在这里补，交给校验器拒绝。"""
+    try:
+        statements = parse(sql, read="duckdb")
+    except ParseError:
+        return []
+    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
+        return []
+    names = []
+    source = statements[0].args.get("from")
+    if source is not None and isinstance(source.this, exp.Table):
+        names.append(source.this.name.lower())
+    for join in statements[0].args.get("joins") or []:
+        if isinstance(join.this, exp.Table):
+            names.append(join.this.name.lower())
+    physical = {dataset.physical_object.lower(): dataset.id for dataset in authorization.sql.datasets}
+    if any(name not in physical for name in names):
+        return []
+    presented = {dataset.id for dataset in presentation.sql.datasets}
+    return sorted({physical[name] for name in names if physical[name] not in presented})
+
+
 def _is_authorized_partner(table_name: str, order_table: str, allowed) -> bool:
     return any(
         table_name != order_table and order_table in {left[0], right[0]} and table_name in {left[0], right[0]}

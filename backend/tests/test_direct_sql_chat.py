@@ -57,7 +57,7 @@ def order_chat(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "DUCKDB_PATH", str(path))
     monkeypatch.setattr(main, "DATABASE_URL", None)
 
-    def ask(client, candidates, message="按业务口径查询订单", conversation_id=None):
+    def ask(client, candidates, message="按业务口径查询订单", conversation_id=None, check_prompt=True):
         replies = []
 
         class Run:
@@ -74,6 +74,8 @@ def order_chat(monkeypatch, tmp_path):
             nonlocal tool
             tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
             assert [item.name for item in agent.tools] == ["execute_direct_sql"]
+            if not check_prompt:
+                return Run()
             assert "方言版本：v" in prompt
             assert "sales_transactions" in prompt
             assert "WITH weekly_sales" not in prompt
@@ -438,3 +440,64 @@ def test_joined_customer_identifier_groups_without_fanout_and_names_the_top_cust
     assert top_events["result"]["rows"] == [[20, 600.0]]
     assert "first_name" not in top_events["result"]["sql"]
     assert "last_name" not in top_events["result"]["sql"]
+
+
+def test_direct_sql_loads_the_semantic_model_once_per_request(order_chat, monkeypatch):
+    from app.semantic import context_builder, snapshot as snapshot_module
+
+    calls = {"n": 0}
+    original = snapshot_module.load_semantic_model
+
+    def counted(path):
+        calls["n"] += 1
+        return original(path)
+
+    monkeypatch.setattr(snapshot_module, "load_semantic_model", counted)
+    monkeypatch.setattr(
+        context_builder,
+        "load_semantic_model",
+        lambda path: (_ for _ in ()).throw(AssertionError("请求过程中重新加载了语义模型")),
+    )
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, [TOTALS])
+    assert events["done"]["status"] == "completed"
+    assert calls["n"] == 1
+
+
+def test_large_space_supplements_an_authorized_dataset_then_revalidates(order_chat, monkeypatch):
+    monkeypatch.setattr(main, "is_small_space", lambda context: False)
+    wrong = "SELECT SUM(amount) AS order_rows FROM orders"
+    with TestClient(main.app) as client:
+        events, replies = order_chat(
+            client,
+            [JOINED, wrong, HISTORICAL],
+            "订单笔数是多少",
+            check_prompt=False,
+        )
+    assert replies[0]["added_datasets"] == ["customer_mart"]
+    assert replies[0]["remaining_coverage"] == 1
+    assert replies[0]["context"]["relationships"][0]["fanout_risk"] is False
+    assert "first_name" not in json.dumps(replies[0]["context"], ensure_ascii=False)
+    assert replies[1]["remaining_repairs"] == 2
+    assert events["result"]["rows"] == [[3, 35.0]]
+    assert events["done"]["status"] == "completed"
+
+
+def test_large_space_still_rejects_an_unauthorized_dataset(order_chat, monkeypatch):
+    monkeypatch.setattr(main, "is_small_space", lambda context: False)
+    payments = "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id"
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [payments, HISTORICAL], "订单笔数是多少", check_prompt=False)
+    assert replies == []
+    assert events["done"]["status"] == "failed"
+    assert "result" not in events
+
+
+def test_context_coverage_stops_after_two_supplements(order_chat, monkeypatch):
+    monkeypatch.setattr(main, "is_small_space", lambda context: False)
+    monkeypatch.setattr(main, "context_coverage_gap", lambda sql, authorization, presentation: ["customer_mart"])
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [JOINED, JOINED, JOINED], "订单笔数是多少", check_prompt=False)
+    assert [reply["remaining_coverage"] for reply in replies] == [1, 0]
+    assert events["done"]["status"] == "failed"
+    assert "result" not in events

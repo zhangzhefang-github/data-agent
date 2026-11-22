@@ -16,17 +16,21 @@ def load_dialect(root: Path) -> dict:
     return dialect
 
 
-def authorized_tables(root: Path) -> list[tuple[str, set[str]]]:
-    context = _orders_context(root)
+def authorized_tables(root: Path, context: SemanticContext | None = None) -> list[tuple[str, set[str]]]:
+    context = context or _orders_context(root)
     return [
         (dataset.physical_object, set(dataset.columns.values()))
         for dataset in context.sql.datasets
     ]
 
 
-def authorized_joins(root: Path) -> set[tuple[tuple[str, str], tuple[str, str]]]:
+def authorized_joins(root: Path, context: SemanticContext | None = None) -> set[tuple[tuple[str, str], tuple[str, str]]]:
     """已授权、且不会放大行数的等值连接。键是排序后的 (物理表, 物理列) 对。"""
-    return _authorized_joins(_orders_context(root))
+    return authorized_join_keys(context or _orders_context(root))
+
+
+def authorized_join_keys(context: SemanticContext) -> set[tuple[tuple[str, str], tuple[str, str]]]:
+    return _authorized_joins(context)
 
 
 def _authorized_joins(context: SemanticContext) -> set[tuple[tuple[str, str], tuple[str, str]]]:
@@ -50,11 +54,16 @@ def orders_query_scope(root: Path) -> str:
     return render_query_scope(_orders_context(root))
 
 
-def render_direct_sql_prompt(root: Path, database: dict) -> str:
-    dialect = load_dialect(root)
+def render_direct_sql_prompt(
+    root: Path,
+    database: dict,
+    context: SemanticContext | None = None,
+    dialect: dict | None = None,
+) -> str:
+    dialect = dialect or load_dialect(root)
     if not str(database["version"]).startswith(dialect["version"]):
         raise ValueError("连接的数据库版本与方言配置不一致")
-    context = _orders_context(root)
+    context = context or _orders_context(root)
     metrics = []
     alias_by_target = {target: alias for alias, target in context.business.metric_aliases.items()}
     for metric in context.business.metrics:
@@ -136,4 +145,100 @@ def _orders_context(root: Path):
         "orders",
         model_path=root / "backend" / "configs" / "semantic" / "jaffle_shop.yaml",
         spaces_path=root / "backend" / "configs" / "semantic" / "spaces.yaml",
+    )
+
+
+def render_two_phase_prompt(
+    root: Path,
+    database: dict,
+    presentation: SemanticContext,
+    catalog: list[dict],
+    dialect: dict | None = None,
+) -> str:
+    """大空间提示只放本次展开的资产。短目录不含表达式和物理映射。"""
+    dialect = dialect or load_dialect(root)
+    if not str(database["version"]).startswith(dialect["version"]):
+        raise ValueError("连接的数据库版本与方言配置不一致")
+    rules = "\n".join(f"- {rule}" for rule in dialect["rules"])
+    visible_tables = {
+        f"main.{dataset.physical_object}" for dataset in presentation.sql.datasets
+    }
+    tables = {name: columns for name, columns in database["tables"].items() if name in visible_tables}
+    if presentation.business.metrics or presentation.sql.datasets:
+        body = _expanded_context(presentation, tables)
+    else:
+        body = "语义短目录（只有标识、名称和同义词，没有表达式和物理映射）：\n" + "\n".join(
+            f"- {item['kind']} {item['id']} {item['name']} {','.join(item['synonyms'])} {item['summary']}".rstrip()
+            for item in catalog
+        )
+    return (
+        f"方言版本：{database['version']}\n"
+        f"方言规则：\n{rules}\n"
+        f"{body}\n"
+        "本次查询约束：直接查询本次展开的表，只提交一条 SELECT。"
+        "不要使用 WITH、子查询、DISTINCT、QUALIFY、date_trunc。"
+        "筛选和分组只能使用已展开维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
+        "查询必须从订单表开始。指标表达式和结果别名必须与已展开指标完全一致。"
+        "只使用已展开关系中的等值内连接。内连接会丢掉对端没有匹配的行。"
+        "fanout_risk 为真的关系不能用于汇总。支付明细未授权时不能连接支付行。"
+    )
+
+
+def _expanded_context(context: SemanticContext, tables: dict) -> str:
+    columns_by_dataset = {dataset.id: dataset.columns for dataset in context.sql.datasets}
+    alias_by_target = {target: alias for alias, target in context.business.metric_aliases.items()}
+    metrics = []
+    for metric in context.business.metrics:
+        alias = alias_by_target.get(metric.id, metric.id.rsplit(".", 1)[-1])
+        if metric.expression_kind == "count":
+            expression = f"COUNT(*) AS {alias}"
+        elif metric.expression_kind == "sum" and metric.field_id:
+            expression = f"SUM({metric.field_id}) AS {alias}"
+        else:
+            continue
+        metrics.append({
+            "id": metric.id,
+            "name": metric.name,
+            "expression": expression,
+            "definition": metric.definition,
+            "base_grain": metric.base_grain,
+            "compatible_dimension_ids": metric.compatible_dimension_ids,
+        })
+    dimensions = [
+        {
+            "id": dimension.id,
+            "name": dimension.name,
+            "column": columns_by_dataset[dimension.source_dataset_id][dimension.field_id],
+            "synonyms": dimension.synonyms,
+        }
+        for dimension in context.business.dimensions
+        if dimension.field_id in columns_by_dataset.get(dimension.source_dataset_id, {})
+    ]
+    datasets = [
+        {
+            "id": dataset.id,
+            "name": dataset.name,
+            "grain": dataset.grain,
+            "physical_object": dataset.physical_object,
+            "columns": dataset.columns,
+        }
+        for dataset in context.sql.datasets
+    ]
+    relationships = []
+    for item in context.sql.relationships:
+        relationships.append({
+            "id": item.id,
+            "source_fields": [columns_by_dataset[item.source_dataset_id][field] for field in item.source_fields],
+            "target_fields": [columns_by_dataset[item.target_dataset_id][field] for field in item.target_fields],
+            "cardinality": item.cardinality,
+            "join_type": item.join_type,
+            "fanout_risk": item.fanout_risk,
+            "row_filtering_risk": item.join_type == "inner",
+        })
+    return (
+        f"本次展开的表：{tables}\n"
+        f"数据集：{datasets}\n"
+        f"指标：{metrics}\n"
+        f"维度：{dimensions}\n"
+        f"关系：{relationships}\n"
     )

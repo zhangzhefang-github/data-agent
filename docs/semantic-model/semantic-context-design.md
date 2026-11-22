@@ -1,5 +1,7 @@
 # Semantic Context 设计
 
+2026-11-21，下面「订单 Space 不包含客户、也不授权 JOIN」的描述已被 [ADR 0004](../adr/0004-customer-order-equijoin.md) 取代。检索与授权的边界见 [ADR 0006](../adr/0006-space-authorization-bounds-retrieval.md)：空间授权是硬边界，短目录只缩小提示，校验使用完整授权。规范语义模型是唯一业务口径，Wiki 不是运行时口径。
+
 `build_semantic_context(domain_id, space_id, user_question=None)` 从已发布模型构建结构化、可序列化的上下文。Domain 决定语义来源，Space 提供显式许可，问题仅在该许可范围内选择条目。
 
 | 投影 | 内容 | 消费方 |

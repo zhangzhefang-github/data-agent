@@ -19,9 +19,17 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.direct_sql import SqlCorrection, SqlRejected, SqlTimeout, execute_order_sql, order_database_context, prior_order_sql
-from app.query_scope import is_query_scope_question
-from app.sql_prompt import authorized_joins, authorized_tables, orders_query_scope, render_direct_sql_prompt
+from app.direct_sql import (
+    SqlCorrection, SqlRejected, SqlTimeout, context_coverage_gap, execute_order_sql,
+    order_database_context, prior_order_sql,
+)
+from app.query_scope import is_query_scope_question, render_query_scope
+from app.semantic.query_ir_adapter import catalog_from_semantic_context
+from app.semantic.retrieval import (
+    MAX_CONTEXT_COVERAGE, expand_authorization, expansion_payload, include_datasets, is_small_space, short_catalog,
+)
+from app.semantic.snapshot import build_orders_snapshot, validation_inputs
+from app.sql_prompt import authorized_tables, render_direct_sql_prompt, render_two_phase_prompt
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
@@ -136,24 +144,28 @@ async def chat(request: ChatRequest):
         source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
         direct_sql = CATALOG["id"] == "orders" and source.engine == "duckdb"
         business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
-        join_keys = authorized_joins(ROOT) if direct_sql else set()
+        # 一次请求只发布一份快照。销售空间仍使用进程目录，不读这份订单快照。
+        snapshot = build_orders_snapshot(ROOT) if direct_sql else None
+        saved_sql = context.get("sql") if context and context.get("mode") == "orders_duckdb" else None
         previous_sql = None
         if direct_sql:
-            if context and context.get("mode") == "orders_duckdb" and isinstance(context.get("sql"), str):
+            if not isinstance(saved_sql, str):
+                context = None
+                saved_sql = None
+            else:
                 try:
-                    previous_sql = prior_order_sql(
-                        context["sql"], CATALOG, business_today,
-                        shift=last_year if is_previous_period else None, joins=join_keys,
+                    prior_order_sql(
+                        saved_sql, catalog_from_semantic_context(snapshot.authorization), business_today,
+                        joins=validation_inputs(snapshot)[1],
                     )
                 except ValueError:
                     context = None
-            else:
-                context = None
+                    saved_sql = None
         elif context and context.get("mode") == "orders_duckdb":
             context = None
 
         if direct_sql and is_query_scope_question(request.message):
-            message = orders_query_scope(ROOT)
+            message = render_query_scope(snapshot.authorization)
             yield event("conversation", {"conversation_id": conversation_id})
             yield event("text", {"delta": message})
             message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
@@ -206,23 +218,44 @@ async def chat(request: ChatRequest):
             return json.dumps(data, ensure_ascii=False)
 
         attempts = 0
+        coverage_attempts = 0
         query_error = None
         query_lock = asyncio.Lock()
+        request_catalog = CATALOG
+        join_keys = set()
+        presentation = None
 
         @function_tool(failure_error_function=None)
         async def execute_direct_sql(sql: str) -> str:
             """Execute one DuckDB SELECT submitted as SQL, with no surrounding Markdown."""
-            nonlocal attempts, query_error
+            nonlocal attempts, coverage_attempts, query_error, presentation
             async with query_lock:
                 if result_data:
                     return json.dumps(result_data[-1], ensure_ascii=False)
                 if query_error or attempts >= 3:
                     raise SqlRejected("查询已结束")
-                attempts += 1
                 candidate = previous_sql if is_previous_period and previous_sql else sql
+                # 补充只发生在大空间的检索遗漏。校验仍用完整授权，未授权表直接拒绝。
+                if snapshot is not None and presentation is not None and not is_previous_period:
+                    gap = context_coverage_gap(candidate, snapshot.authorization, presentation)
+                    if gap:
+                        if coverage_attempts >= MAX_CONTEXT_COVERAGE:
+                            query_error = "已授权上下文补充次数已用尽"
+                            raise SqlRejected(query_error)
+                        coverage_attempts += 1
+                        presentation = include_datasets(
+                            snapshot.authorization, presentation, gap, snapshot.object_datasets,
+                        )
+                        return json.dumps({
+                            "error": "这些数据集已在空间授权内，但没有进入本次上下文。请根据补充定义重新生成 SQL。",
+                            "added_datasets": gap,
+                            "context": expansion_payload(snapshot.authorization, gap),
+                            "remaining_coverage": MAX_CONTEXT_COVERAGE - coverage_attempts,
+                        }, ensure_ascii=False)
+                attempts += 1
                 try:
                     data = await asyncio.to_thread(
-                        execute_order_sql, Path(source.location), candidate, CATALOG, business_today, join_keys,
+                        execute_order_sql, Path(source.location), candidate, request_catalog, business_today, join_keys,
                     )
                 except SqlCorrection as exc:
                     logger.error("Direct SQL needs repair (%s): %s", exc, candidate)
@@ -247,8 +280,21 @@ async def chat(request: ChatRequest):
             run_options = {}
             if direct_sql:
                 database = await asyncio.to_thread(
-                    order_database_context, Path(source.location), authorized_tables(ROOT),
+                    order_database_context, Path(source.location), authorized_tables(ROOT, snapshot.authorization),
                 )
+                snapshot = snapshot.with_schema(database)
+                request_catalog, join_keys = validation_inputs(snapshot)
+                if isinstance(saved_sql, str) and context:
+                    previous_sql = prior_order_sql(
+                        saved_sql, request_catalog, business_today,
+                        shift=last_year if is_previous_period else None, joins=join_keys,
+                    )
+                if is_small_space(snapshot.authorization):
+                    presentation = snapshot.authorization
+                else:
+                    presentation = expand_authorization(
+                        snapshot.authorization, request.message, snapshot.object_datasets,
+                    )
                 instructions = (
                     "你是订单主题空间助手。用 execute_direct_sql 提交 DuckDB SQL。"
                     "只使用本次授权的表和列，以及授权指标的表达式和结果别名。"
@@ -263,7 +309,18 @@ async def chat(request: ChatRequest):
                 )
                 # 订单 Direct SQL 只保留执行器。目录工具会按问题裁剪授权，和本次提示不是同一份范围。
                 tools = [execute_direct_sql]
-                prompt += "\n" + render_direct_sql_prompt(ROOT, database)
+                if presentation is snapshot.authorization:
+                    prompt += "\n" + render_direct_sql_prompt(
+                        ROOT, database, snapshot.authorization, snapshot.dialect,
+                    )
+                else:
+                    prompt += "\n" + render_two_phase_prompt(
+                        ROOT,
+                        database,
+                        presentation,
+                        [item.model_dump() for item in short_catalog(snapshot.authorization)],
+                        snapshot.dialect,
+                    )
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
                     if is_previous_period:
