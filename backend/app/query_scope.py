@@ -86,7 +86,8 @@ def _dataset_line(index: int, dataset: ContextDataset, context: SemanticContext)
             if dimension.allowed_values:
                 sentences.append(f"{dimension.name}包括{'、'.join(dimension.allowed_values)}")
     if not metrics and not dimensions:
-        columns = "、".join(_field_name(context, field_id) for field_id in dataset.columns)
+        # 列来自集合，显示顺序必须固定，否则同一范围说明每次不同。
+        columns = "、".join(sorted(_field_name(context, field_id) for field_id in dataset.columns))
         sentences.append(f"当前可关联的列是{columns}" if columns else "当前没有可直接筛选的列")
     return "。".join(part.strip("。") for part in sentences if part) + "。"
 
