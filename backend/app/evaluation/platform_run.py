@@ -197,6 +197,14 @@ def _skipped_platform_case(case):
         "reason": "OPENAI_API_KEY 未设置",
         "actual_columns": [],
         "actual_rows": [],
+        "generated_sql": "",
+        "latency": None,
+        "error_details": {"message": "OPENAI_API_KEY 未设置"},
+        "leaked": verdict.get("leaked", 0),
+        "expected_behavior": case.get("expected_behavior"),
+        "expected_result": case.get("expected_result"),
+        "category": case.get("category"),
+        "actual_result": {"columns": [], "rows": []},
     }
 
 
@@ -236,7 +244,17 @@ def _score_case(case, observation):
         "actual_columns": actual_columns,
         "actual_rows": actual_rows,
         "failure_stage": failure,
+        "generated_sql": _generated_sql(observation),
+        "latency": _latency(observation),
+        "error_details": _error_details(observation),
+        "leaked": verdict.get("leaked", 0),
+        "expected_behavior": case.get("expected_behavior"),
+        "expected_result": case.get("expected_result"),
+        "category": case.get("category"),
+        "actual_result": {"columns": actual_columns, "rows": actual_rows},
     }
+    if isinstance(observation, dict) and "token_usage" in observation:
+        report["token_usage"] = observation["token_usage"]
     return report
 
 
@@ -271,7 +289,46 @@ def _error_case(case, reason):
         "execution_status": "database_error",
         "proves_model_sql": False,
         "reason": reason,
+        "generated_sql": "",
+        "latency": None,
+        "error_details": {"message": reason},
+        "leaked": 0,
+        "expected_behavior": case.get("expected_behavior"),
+        "expected_result": case.get("expected_result"),
+        "category": case.get("category"),
+        "actual_columns": [],
+        "actual_rows": [],
+        "actual_result": {"columns": [], "rows": []},
     }
+
+
+def _generated_sql(observation):
+    if not isinstance(observation, dict):
+        return ""
+    result = observation.get("result")
+    if isinstance(result, dict) and isinstance(result.get("sql"), str):
+        return result["sql"]
+    sql = observation.get("sql")
+    return sql if isinstance(sql, str) else ""
+
+
+def _latency(observation):
+    if not isinstance(observation, dict):
+        return None
+    if "latency" in observation:
+        return observation["latency"]
+    return observation.get("latency_ms")
+
+
+def _error_details(observation):
+    if not isinstance(observation, dict) or not observation.get("error"):
+        return None
+    error = observation["error"]
+    if isinstance(error, dict):
+        return {"code": error.get("code"), "message": error.get("message")}
+    if isinstance(error, str):
+        return {"message": error}
+    return {"message": "查询失败"}
 
 
 def _summary(cases):
@@ -286,6 +343,7 @@ def _report(mode, dataset, cases, *, proves_model_sql, mock):
         "mode": mode,
         "dataset_id": dataset["dataset_id"],
         "dataset_version": dataset["dataset_version"],
+        "dataset_snapshot_id": dataset["dataset_snapshot_id"],
         "proves_model_sql": proves_model_sql,
         "mock": mock,
         "cases": cases,
