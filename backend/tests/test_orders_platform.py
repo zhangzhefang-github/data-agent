@@ -102,6 +102,19 @@ def _row_key(row):
     return json.dumps(row, ensure_ascii=False, sort_keys=True)
 
 
+def test_every_case_has_a_business_basis_and_window_totals_stay():
+    cases = _cases()
+    window = next(case for case in cases if case["case_id"] == "window_order_totals")
+
+    assert len(cases) == 60
+    for case in cases:
+        basis = case.get("business_basis", "")
+        assert isinstance(basis, str) and basis.strip()
+        assert basis.endswith("。")
+    assert window["expected_result"]["rows"] == [[99, 1672.0]]
+    assert window["expected_behavior"] == "answer"
+
+
 def test_orders_platform_schema_and_category_counts():
     cases = _cases()
 
@@ -176,6 +189,56 @@ def test_same_intent_stays_in_one_split_and_synonyms_share_result():
 
     for intent_id in ("customer_orders", "by_customer", "top_customer"):
         assert len(grouped[intent_id]) == 2
+
+
+FOLLOWUP_TURNS = {
+    "followup_prior_year": (
+        "2018-01-01 至 2018-04-09 的订单笔数和订单金额是多少",
+        "去年同期",
+    ),
+    "followup_january_completed": (
+        "2018-01-01 至 2018-01-31 的订单笔数和订单金额是多少",
+        "只看已完成的",
+    ),
+    "followup_shipped_credit_card": (
+        "2018-01-01 至 2018-04-09 按订单状态统计订单笔数和订单金额",
+        "已发货状态的信用卡金额是多少",
+    ),
+    "followup_top_customer_tenders": (
+        "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+        "这名客户的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+    ),
+    "followup_top_two_customers": (
+        "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+        "按订单金额从高到低列出前两名客户标识，金额相同则客户标识较小者在前",
+    ),
+    "followup_march_completed": (
+        "2018-03-01 至 2018-03-31 的订单笔数和订单金额是多少",
+        "其中已完成的呢",
+    ),
+    "followup_february_bank_transfer": (
+        "2018-01-01 至 2018-04-09 的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+        "银行转账金额在 2018-02-01 至 2018-02-28 是多少",
+    ),
+    "followup_completed_by_customer": (
+        "2018-01-01 至 2018-04-09 已完成订单的笔数和订单金额是多少",
+        "按客户标识拆开，看每个客户的已完成订单笔数和订单金额",
+    ),
+}
+
+
+def test_followup_cases_keep_the_previous_question_on_its_own_turn():
+    cases = {case["case_id"]: case for case in _cases()}
+    followups = [case for case in cases.values() if case["category"] == "多轮追问"]
+
+    assert len(followups) == 8
+    assert {case["case_id"] for case in followups} == set(FOLLOWUP_TURNS)
+    for case in followups:
+        previous, followup = FOLLOWUP_TURNS[case["case_id"]]
+        assert case["previous_question"] == previous
+        assert case["user_question"] == followup
+        assert case["expected_behavior"] == "answer"
+        assert "上一轮" not in case["user_question"]
 
 
 def test_three_legacy_acceptance_questions_keep_their_results():

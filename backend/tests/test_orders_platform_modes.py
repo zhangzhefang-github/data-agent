@@ -44,6 +44,127 @@ def _platform_subset(tmp_path, cases):
     return path
 
 
+def test_run_returns_a_manifest_and_a_sectioned_report(tmp_path):
+    dataset = json.loads(PLATFORM_DATASET.read_text(encoding="utf-8"))
+    window = next(case for case in dataset["cases"] if case["case_id"] == "window_order_totals")
+    dataset_path = _platform_subset(tmp_path, [window])
+
+    def fake_runner(case):
+        return {
+            "result": {"columns": ["order_rows", "order_amount"], "rows": [[99, 1672.0]], "sql": "SELECT 1"},
+            "done": "completed",
+        }
+
+    fake_runner.mock = True
+    report = run_orders_platform(
+        "model",
+        runner=fake_runner,
+        dataset_path=dataset_path,
+        repo_root=tmp_path,
+    )
+
+    assert report["proves_model_sql"] is False
+    assert report["mock"] is True
+    assert report["cases"][0]["evaluation_status"] == "PASS"
+    assert report["cases"][0]["actual_rows"] == [[99, 1672.0]]
+    manifest = report["manifest"]
+    assert manifest["mode"] == "model"
+    assert manifest["mock"] is True
+    assert manifest["proves_model_sql"] is False
+    assert manifest["dataset_version"] == report["dataset_version"]
+    written = tmp_path / "var" / "evaluation-runs" / f"{manifest['run_id']}.json"
+    assert json.loads(written.read_text(encoding="utf-8")) == manifest
+    assert set(report["report"]) >= {
+        "semantic",
+        "sql",
+        "business_result",
+        "safety",
+        "context",
+        "engineering",
+        "summary_zh",
+    }
+    assert report["report"]["business_result"]["pass_count"] == 1
+    assert "综合准确率" not in report["report"]["summary_zh"]
+
+
+def test_pinned_model_or_semantic_version_mismatch_is_error_not_pass(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-eval-named")
+    dataset = json.loads(PLATFORM_DATASET.read_text(encoding="utf-8"))
+    window = next(case for case in dataset["cases"] if case["case_id"] == "window_order_totals")
+    dataset_path = _platform_subset(tmp_path, [window])
+
+    def fake_runner(case):
+        return {
+            "result": {"columns": ["order_rows", "order_amount"], "rows": [[99, 1672.0]], "sql": "SELECT 1"},
+            "done": "completed",
+        }
+
+    fake_runner.mock = True
+    wrong_model = run_orders_platform(
+        "model",
+        runner=fake_runner,
+        dataset_path=dataset_path,
+        repo_root=tmp_path,
+        model_version="not-the-configured-model",
+    )
+    assert wrong_model["summary"]["PASS"] == 0
+    assert wrong_model["summary"]["ERROR"] == 1
+    assert wrong_model["cases"][0]["evaluation_status"] == "ERROR"
+    assert wrong_model["manifest"]["model_version"] is None
+    assert wrong_model["proves_model_sql"] is False
+
+    wrong_semantic = run_orders_platform(
+        "model",
+        runner=fake_runner,
+        dataset_path=dataset_path,
+        repo_root=tmp_path,
+        semantic_model_version="not-the-orders-snapshot",
+    )
+    assert wrong_semantic["summary"]["PASS"] == 0
+    assert wrong_semantic["cases"][0]["evaluation_status"] == "ERROR"
+    assert wrong_semantic["manifest"]["model_version"] is None
+
+    matched = run_orders_platform(
+        "model",
+        runner=fake_runner,
+        dataset_path=dataset_path,
+        repo_root=tmp_path,
+        model_version="gpt-eval-named",
+        semantic_model_version="1.0",
+    )
+    assert matched["cases"][0]["evaluation_status"] == "PASS"
+    assert matched["cases"][0]["actual_rows"] == [[99, 1672.0]]
+    assert matched["manifest"]["model_version"] is None
+    assert matched["mock"] is True
+
+
+def test_live_manifest_records_only_a_supplied_model_version(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-eval-named")
+    dataset = json.loads(PLATFORM_DATASET.read_text(encoding="utf-8"))
+    window = next(case for case in dataset["cases"] if case["case_id"] == "window_order_totals")
+    dataset_path = _platform_subset(tmp_path, [window])
+
+    omitted = run_orders_platform("live", dataset_path=dataset_path, repo_root=tmp_path)
+    assert omitted["summary"]["SKIPPED"] == 1
+    assert omitted["summary"]["PASS"] == 0
+    assert omitted["manifest"]["model_version"] is None
+    assert omitted["proves_model_sql"] is False
+
+    pinned = run_orders_platform(
+        "live",
+        dataset_path=dataset_path,
+        repo_root=tmp_path,
+        model_version="gpt-eval-named",
+    )
+    assert pinned["summary"]["SKIPPED"] == 1
+    assert pinned["summary"]["PASS"] == 0
+    assert pinned["manifest"]["mode"] == "live"
+    assert pinned["manifest"]["model_name"] == "gpt-eval-named"
+    assert pinned["manifest"]["model_version"] == "gpt-eval-named"
+    assert pinned["manifest"]["mock"] is False
+
+
 def test_dataset_version_mismatch_is_error_and_not_a_pass():
     report = run_orders_platform("deterministic", dataset_version="not-the-dataset")
 
@@ -141,10 +262,12 @@ def test_deterministic_clarification_passes_when_the_validator_stops_the_sql(tmp
     by_id = {case["id"]: case for case in report["cases"]}
     assert by_id["clarify_customer_name"]["evaluation_status"] == "PASS"
     assert by_id["clarify_customer_name"]["execution_status"] == "clarification_required"
-    assert by_id["clarify_success_status"]["evaluation_status"] == "PASS"
+    assert by_id["clarify_success_status"]["evaluation_status"] == "SKIPPED"
     assert by_id["clarify_customer_name_returns_rows"]["evaluation_status"] == "FAIL"
     assert by_id["clarify_customer_name_returns_rows"]["actual_rows"] == [[99, 1672.0]]
-    assert report["summary"]["PASS"] == 2
+    assert report["summary"]["PASS"] == 1
+    assert report["summary"]["SKIPPED"] == 1
+    assert report["summary"]["FAIL"] == 1
     assert report["proves_model_sql"] is False
 
 
@@ -193,9 +316,17 @@ def test_deterministic_platform_dataset_runs_without_the_sales_golden(monkeypatc
     window = next(case for case in report["cases"] if case["id"] == "window_order_totals")
     assert window["evaluation_status"] == "PASS"
     assert window["actual_rows"] == [[99, 1672.0]]
-    failed = [case["id"] for case in report["cases"] if case["evaluation_status"] != "PASS"]
+    skipped = sorted(case["id"] for case in report["cases"] if case["evaluation_status"] == "SKIPPED")
+    assert skipped == [
+        "clarify_highest_customer_metric",
+        "clarify_order_plus_payment",
+        "clarify_success_status",
+    ]
+    failed = [
+        case["id"] for case in report["cases"] if case["evaluation_status"] not in {"PASS", "SKIPPED"}
+    ]
     assert failed == []
-    assert report["summary"] == {"PASS": 60, "FAIL": 0, "ERROR": 0, "SKIPPED": 0}
+    assert report["summary"] == {"PASS": 57, "FAIL": 0, "ERROR": 0, "SKIPPED": 3}
 
 
 def test_model_mode_scores_an_injected_runner_and_marks_the_mock(monkeypatch, tmp_path):
@@ -309,6 +440,41 @@ def test_live_mode_scores_the_chat_path_and_ignores_reference_sql_and_mock(monke
     assert by_id["reject_average"]["proves_model_sql"] is False
     assert report["summary"]["PASS"] == 1
     assert seen == [case["user_question"] for case in selected]
+
+
+def test_live_followup_sends_the_previous_question_as_its_own_turn(monkeypatch, tmp_path):
+    dataset = json.loads(PLATFORM_DATASET.read_text(encoding="utf-8"))
+    followup = next(case for case in dataset["cases"] if case["case_id"] == "followup_prior_year")
+    dataset_path = _platform_subset(tmp_path, [followup])
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("SALES_DUCKDB_PATH", "/tmp/jaffle_shop.duckdb")
+    seen = []
+
+    def fake_send(client, question, conversation_id=None):
+        seen.append(question)
+        if conversation_id is None:
+            return {
+                "conversation_id": "conv-1",
+                "result": {
+                    "columns": ["order_rows", "order_amount"],
+                    "rows": [[99, 1672.0]],
+                    "sql": "SELECT 1",
+                },
+                "done": "completed",
+            }
+        return {
+            "result": {"columns": ["order_rows", "order_amount"], "rows": [], "sql": "SELECT 1"},
+            "done": "completed",
+        }
+
+    monkeypatch.setattr("app.evaluation.runner.send", fake_send)
+    report = run_orders_platform("live", dataset_path=dataset_path, repo_root=tmp_path)
+
+    assert seen == [followup["previous_question"], followup["user_question"]]
+    assert followup["user_question"] == "去年同期"
+    assert report["cases"][0]["evaluation_status"] == "PASS"
+    assert report["proves_model_sql"] is True
+    assert report["mock"] is False
 
 
 def test_deterministic_loads_the_duckdb_path_without_an_explicit_argument(monkeypatch, tmp_path):

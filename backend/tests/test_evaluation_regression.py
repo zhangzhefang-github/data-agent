@@ -17,6 +17,7 @@ def test_compare_runs_records_dataset_model_and_semantic_versions_of_both_runs()
         "dataset_version": "orders-2026-11-22",
         "model_name": "gpt-baseline",
         "model_version": "2026-01-01",
+        "prompt_version": "prompt-hash-baseline",
         "semantic_model_version": "orders-semantic-3",
         "semantic_model_hash": "aaa111",
         "cases": [],
@@ -34,6 +35,7 @@ def test_compare_runs_records_dataset_model_and_semantic_versions_of_both_runs()
         "dataset_version": "orders-2026-11-22",
         "model_name": "gpt-baseline",
         "model_version": "2026-01-01",
+        "prompt_version": "prompt-hash-baseline",
         "semantic_model_version": "orders-semantic-3",
         "semantic_model_hash": "aaa111",
     }
@@ -41,6 +43,7 @@ def test_compare_runs_records_dataset_model_and_semantic_versions_of_both_runs()
         "dataset_version": "orders-2026-11-23",
         "model_name": None,
         "model_version": None,
+        "prompt_version": None,
         "semantic_model_version": "orders-semantic-4",
         "semantic_model_hash": "bbb222",
     }
@@ -254,6 +257,7 @@ def test_summary_zh_names_version_moves_case_lists_and_deltas():
         "dataset_version": "orders-2026-11-22",
         "model_name": "gpt-baseline",
         "model_version": "2026-01-01",
+        "prompt_version": "prompt-hash-baseline",
         "semantic_model_version": "orders-semantic-3",
         "semantic_model_hash": "aaa111",
         "cases": [
@@ -279,6 +283,7 @@ def test_summary_zh_names_version_moves_case_lists_and_deltas():
         "基线数据集版本为 orders-2026-11-22，候选数据集版本为 orders-2026-11-23。"
         "基线模型名为 gpt-baseline，候选模型名未记录。"
         "基线模型版本为 2026-01-01，候选模型版本未记录。"
+        "基线提示版本为 prompt-hash-baseline，候选提示版本未记录。"
         "基线语义模型版本为 orders-semantic-3，候选语义模型版本为 orders-semantic-4。"
         "基线语义模型哈希为 aaa111，候选语义模型哈希为 bbb222。"
         "新增通过 2 条：recovered、sem_bad。"
@@ -304,6 +309,7 @@ def test_summary_zh_names_version_moves_case_lists_and_deltas():
     assert "延迟变化（候选减基线）无法计算。" in empty["summary_zh"]
     assert "token 变化（候选减基线）无法计算。" in empty["summary_zh"]
     assert "基线模型名未记录，候选模型名未记录。" in empty["summary_zh"]
+    assert "基线提示版本未记录，候选提示版本未记录。" in empty["summary_zh"]
 
 
 def test_compare_runs_reads_manifest_files_and_leaves_the_golden_dataset_unchanged(tmp_path):
