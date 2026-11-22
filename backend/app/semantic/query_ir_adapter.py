@@ -70,7 +70,29 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
         "metric_input_aliases": metric_input_aliases,
         "dimension_input_aliases": dimension_input_aliases,
         "instructions": "只使用已发布规范语义模型授权的指标和维度。",
+        "physical_tables": [
+            {"id": dataset.id, "table": dataset.physical_object.lower()}
+            for dataset in context.sql.datasets
+        ],
+        "fanouts": _fanouts(context),
     }
+
+
+def _fanouts(context: SemanticContext) -> list[dict]:
+    datasets = {dataset.id: dataset for dataset in context.sql.datasets}
+    fanouts = []
+    for relationship in context.sql.relationships:
+        if not relationship.fanout_risk or relationship.cardinality != "many_to_one":
+            continue
+        source = datasets[relationship.source_dataset_id]
+        target = datasets[relationship.target_dataset_id]
+        field_id = relationship.source_fields[0]
+        fanouts.append({
+            "table": source.physical_object.lower(),
+            "anchor": target.physical_object.lower(),
+            "key": source.columns.get(field_id, field_id).lower(),
+        })
+    return fanouts
 
 
 def _wire_metric_id(identifier: str, aliases: dict[str, str]) -> str:

@@ -28,6 +28,7 @@ def test_profile_jaffle_shop_reports_the_real_catalog_and_relationship_evidence(
     assert [(item.name, item.object_type, item.row_count) for item in profile.objects] == [
         ("customers", "table", 100),
         ("orders", "table", 99),
+        ("payments", "view", 113),
         ("raw_customers", "table", 100),
         ("raw_orders", "table", 99),
         ("raw_payments", "table", 113),
@@ -103,7 +104,7 @@ def test_real_profile_matches_the_modeled_relationship_states_and_customer_evide
         (evidence.source_dataset_id, evidence.target_dataset_id): evidence
         for evidence in profile.relationships.values()
     }
-    assert len(model.dataset_relationships) == len(evidence_by_datasets) == 5
+    assert len(model.dataset_relationships) == len(evidence_by_datasets) == 6
     for relationship in model.dataset_relationships:
         evidence = evidence_by_datasets[(relationship.source_dataset_id, relationship.target_dataset_id)]
         assert relationship.verification_status == evidence.verification_status == "profiled"

@@ -42,7 +42,7 @@ npm --prefix frontend run build
 
 要读取 DuckDB 文件，在 `.env` 设置 `SALES_DUCKDB_PATH=/绝对路径/销售数据.duckdb`。服务以只读方式打开该文件，不会根据文件名猜测引擎。文件需包含当前主题空间声明的单表和字段。`SALES_SPACE=orders` 时使用订单主题空间，物理表为 `orders`，适合 Wren 的 `jaffle_shop.duckdb`。默认 `sales` 仍使用销售汇总表。`SALES_DATABASE_URL` 优先于 DuckDB，DuckDB 优先于 `SALES_SQLITE_PATH`。
 
-订单主题空间连接 DuckDB 时默认使用 Direct SQL，不退回结构化查询。Agent 直接生成 SQL，后端用已发布规范语义模型检查获准的表、字段、指标和客户–订单等值内连接，随后只读执行。DuckDB 是这条路径的开发和验收数据库。SQLite 与 PostgreSQL 仍可按下文接入。「去年同期」追问以同一 Direct SQL 会话的最近一次成功查询为依据。[ADR 0003](docs/adr/0003-direct-sql-duckdb-first.md)
+订单主题空间连接 DuckDB 时默认使用 Direct SQL，不退回结构化查询。Agent 直接生成 SQL，后端用已发布规范语义模型检查获准的表、字段、指标和客户–订单等值内连接，随后只读执行。DuckDB 是这条路径的开发和验收数据库。SQLite 与 PostgreSQL 仍可按下文接入。「去年同期」追问以同一 Direct SQL 会话的最近一次成功查询为依据。[ADR 0003](docs/adr/0003-direct-sql-duckdb-first.md) 查询形状以 [ADR 0007](docs/adr/0007-readonly-sql-with-fanout.md) 为准：一条只读语句可以包含 WITH 和空间内的连接，订单指标仍按订单粒度校验。
 
 要连接 PostgreSQL，在 `.env` 设置 `SALES_DATABASE_URL=postgresql://用户名:密码@主机:端口/数据库`，并为销售模型在 YAML 的 `models.sales_summary` 下添加 `schema`，同时配置允许的表、字段和指标表达式。使用仅授予该 schema 和表 SELECT 权限的数据库账户。服务使用只读事务、5 秒连接和语句超时、参数绑定及表字段白名单。三者同时设置时，PostgreSQL 优先，其次是 DuckDB，最后是 SQLite。重启后端生效。
 

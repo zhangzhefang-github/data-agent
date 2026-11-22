@@ -66,6 +66,20 @@ def test_lineage_rejects_missing_dataset_references_and_blocks_publish():
         SemanticModelRegistry().publish(model)
 
 
+def test_dataset_field_ids_must_be_unique_within_the_dataset():
+    model = load_semantic_model(MODEL_PATH)
+    dataset = next(item for item in model.datasets if item.id == "order_mart")
+    dataset.fields.append(dataset.fields[0].model_copy(deep=True))
+
+    result = validate_semantic_model(model)
+
+    assert ("order_mart", "fields", "duplicate_id") in {
+        (item.object_id, item.field, item.code) for item in result.errors
+    }
+    with pytest.raises(ValueError, match="not published"):
+        SemanticModelRegistry().publish(model)
+
+
 def test_lineage_rejects_duplicate_ids_and_blocks_publish():
     model = load_semantic_model(MODEL_PATH)
     duplicate = model.dataset_lineage[0].model_copy(deep=True)
@@ -109,6 +123,7 @@ def test_business_relationship_maps_only_to_joins_of_its_objects():
         "order_source_customer_source",
     ]
     assert order_payment.dataset_relationship_ids == [
+        "payment_mart_order_mart",
         "payment_staging_order_staging",
         "payment_source_order_source",
     ]

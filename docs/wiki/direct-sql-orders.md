@@ -39,3 +39,5 @@
 上文把订单 Direct SQL 的工程位置写在 `/home/zzf/data-agent-direct-sql`。该说法被本仓库 `main` 在 `f6043af` 之上的收尾取代：订单主题空间连接 DuckDB 时，默认路径在本仓库，为 Semantic Model → Semantic Context → 模型生成原生 SQL → SQL Validator → DuckDB 只读执行。DuckDB 是订单的开发、运行和验收数据库。SQLite 与 PostgreSQL 保留兼容。Query IR 和 Compiler 保留，订单 DuckDB 默认路径不退回结构化查询。
 
 同日注入 SQL 的三道客户题结果见 [客户–订单授权上下文](customer-order-context.md)。真实模型本轮没有重跑。
+
+2026-11-22，上文「拒绝 `WITH filtered_orders` 并收紧方言」仍是当时的处理。同日这道句法限制被标成下一步要拆掉的差距，见 [Genie 的 SQL 形状](genie-sql-shape.md)。`data-agent@f9bc191` 的校验器还没有放开。

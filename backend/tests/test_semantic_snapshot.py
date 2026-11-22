@@ -57,7 +57,8 @@ def test_short_catalog_omits_unauthorized_assets_and_physical_detail():
 
     assert "orders.order_count" in identifiers
     assert "order_mart_customer_mart" in identifiers
-    assert "payment" not in identifiers
+    assert "payment" in identifiers
+    assert "payment_mart" in identifiers
     assert "payment_staging" not in rendered
     assert "payment_source" not in rendered
     assert "raw_orders" not in rendered
@@ -180,11 +181,11 @@ def test_prompt_and_validator_share_the_full_authorization(tmp_path: Path):
     )
     assert gap == ["customer_mart"]
     assert context_coverage_gap(
-        "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id",
+        "SELECT COUNT(*) AS order_rows FROM orders JOIN stg_payments ON orders.order_id = stg_payments.order_id",
         bound.authorization,
         expanded,
     ) == []
-    with pytest.raises(SqlRejected, match="未授权"):
+    with pytest.raises(SqlRejected, match="支付明细"):
         _validate_order_sql(
             "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id",
             catalog,

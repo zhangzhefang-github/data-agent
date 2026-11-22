@@ -37,7 +37,7 @@ business_objects:
     name: Payment
     domain_id: sales
     candidate_key: payment_id
-    dataset_ids: [payment_staging, payment_source]
+    dataset_ids: [payment_mart, payment_staging, payment_source]
     attributes:
       - {id: payment_id, name: 支付标识, data_type: integer}
       - {id: order_id, name: 订单标识, data_type: integer}
@@ -55,7 +55,7 @@ business_relationships:
     target_object_id: payment
     cardinality: one_to_many
     verification_status: proposed
-    dataset_relationship_ids: [payment_staging_order_staging, payment_source_order_source]
+    dataset_relationship_ids: [payment_mart_order_mart, payment_staging_order_staging, payment_source_order_source]
 datasets:
   - id: customer_mart
     name: 客户汇总
@@ -99,6 +99,24 @@ datasets:
       object_name: orders
       object_type: table
       column_mappings: {order_id: order_id, customer_id: customer_id, order_date: order_date, status: status, credit_card_amount: credit_card_amount, coupon_amount: coupon_amount, bank_transfer_amount: bank_transfer_amount, gift_card_amount: gift_card_amount, amount: amount}
+  - id: payment_mart
+    name: 支付明细
+    domain_id: sales
+    dataset_type: fact
+    grain: [payment_id]
+    primary_key: [payment_id]
+    exposure_policy: approved
+    fields:
+      - {id: payment_id, name: 支付标识, data_type: integer}
+      - {id: order_id, name: 订单标识, data_type: integer}
+      - {id: payment_method, name: 支付方式, data_type: string}
+      - {id: amount, name: 支付金额, data_type: decimal}
+      - {id: order_date, name: 订单日期, data_type: date}
+    physical_mapping:
+      data_source_id: jaffle_duckdb
+      object_name: payments
+      object_type: view
+      column_mappings: {payment_id: payment_id, order_id: order_id, payment_method: payment_method, amount: amount, order_date: order_date}
   - id: customer_staging
     name: 客户标准化层
     domain_id: sales
@@ -178,6 +196,7 @@ dataset_lineage:
   - {id: order_staging_to_mart, source_dataset_id: order_staging, target_dataset_id: order_mart, verification_status: proposed}
 dataset_relationships:
   - {id: order_mart_customer_mart, source_dataset_id: order_mart, target_dataset_id: customer_mart, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, join_type: inner, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
+  - {id: payment_mart_order_mart, source_dataset_id: payment_mart, target_dataset_id: order_mart, source_fields: [order_id], target_fields: [order_id], cardinality: many_to_one, join_type: inner, fanout_risk: true, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: order_staging_customer_staging, source_dataset_id: order_staging, target_dataset_id: customer_staging, source_fields: [customer_id], target_fields: [customer_id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: order_source_customer_source, source_dataset_id: order_source, target_dataset_id: customer_source, source_fields: [user_id], target_fields: [id], cardinality: many_to_one, verification_status: profiled, match_rate: 1.0, orphan_count: 0}
   - {id: payment_staging_order_staging, source_dataset_id: payment_staging, target_dataset_id: order_staging, source_fields: [order_id], target_fields: [order_id], cardinality: many_to_one, fanout_risk: true, verification_status: profiled, match_rate: 1.0, orphan_count: 0}

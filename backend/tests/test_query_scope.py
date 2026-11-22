@@ -14,17 +14,19 @@ def test_orders_scope_projects_authorized_datasets_and_the_customer_join():
 
     assert text.startswith("可查询的数据范围\n这是订单主题空间。")
     assert "可以按订单日期、订单状态、客户标识筛选或分组" in text
-    assert "1. 订单汇总（orders）" in text
+    assert "支付明细（payments）" in text
+    assert "订单汇总（orders）" in text
     assert "可查询订单金额、订单笔数、信用卡金额、优惠券金额、银行转账金额、礼品卡金额" in text
     assert "不要再与 amount 相加" in text
     assert "每笔订单一笔，包含全部状态" in text
     assert "订单状态包括已下单、已发货、已完成、退货中、已退货" in text
-    assert "2. 客户汇总（customers）。当前可关联的列是客户标识。" in text
+    assert "客户汇总（customers）。当前可关联的列是客户标识。" in text
+    assert "关联可能放大行数" in text
     assert "订单汇总与客户汇总按客户标识等值内连接，多对一，不会放大行数。" in text
     assert "用户询问客户姓名时，用客户标识回答，并说明姓名未授权。" in text
     assert "可以这样问\n某个日期区间的订单笔数和订单金额" in text
     assert text.endswith("直接说出要看的时间、状态或客户即可查询。")
-    for hidden in ("first_name", "last_name", "order_id", "payment", "stg_", "raw_"):
+    for hidden in ("first_name", "last_name", "stg_", "raw_"):
         assert hidden not in text
 
 

@@ -1,6 +1,6 @@
 # 查询架构演进
 
-[ADR 0002](../adr/0002-canonical-semantic-model.md) 由规范语义模型定义订单业务口径、授权和物理映射。[ADR 0003](../adr/0003-direct-sql-duckdb-first.md) 将订单主题空间的 DuckDB 默认查询路径切换到 Direct SQL。销售主题空间的结构化路径由 [ADR 0001](../adr/0001-structured-sales-query-boundary.md) 定义。
+[ADR 0002](../adr/0002-canonical-semantic-model.md) 由规范语义模型定义订单业务口径、授权和物理映射。[ADR 0003](../adr/0003-direct-sql-duckdb-first.md) 将订单主题空间的 DuckDB 默认查询路径切换到 Direct SQL。查询形状以 [ADR 0007](../adr/0007-readonly-sql-with-fanout.md) 为准：一条只读语句可以包含 WITH、子查询、空间内的 JOIN、GROUP BY 和窗口函数；Fanout 在这条查询里先汇总再连接。销售主题空间的结构化路径由 [ADR 0001](../adr/0001-structured-sales-query-boundary.md) 定义。
 
 | 路径 | 流程 | Phase 1 适用范围 |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 
 Agent 取得实际 DuckDB 版本、获准的表和字段，以及已执行验证的 SQL 示例。SQLGlot 校验单条 SELECT。程序校验指标表达式、授权维度的筛选和分组、排序，以及已授权的等值内连接。未授权表、支付明细关联和外部数据源会被拒绝。语义校验器会拒绝未预聚合的 Fanout。执行器不执行未授权连接。带 Fanout 的支付关系仍不向问数开放。
 
-2026-11-22，上一段是 `data-agent@f9bc191` 的执行边界。同日下一步改为 Genie 的两条限制：只读，且只能访问该空间列出的表。WITH、子查询、空间内多表 JOIN、GROUP BY 和窗口函数要能执行。订单笔数和订单金额在未先按订单汇总的支付连接上聚合，仍然拒绝。见 [Genie 的 SQL 形状](../wiki/genie-sql-shape.md)。
+2026-11-22，上一段是 `data-agent@f9bc191` 的执行边界。[ADR 0007](../adr/0007-readonly-sql-with-fanout.md) 决定：只读，且只能访问该空间列出的表。WITH、子查询、空间内多表 JOIN、GROUP BY 和窗口函数可以出现在同一条语句里。订单笔数和订单金额在未先按订单汇总的支付连接上聚合，仍然拒绝。不规定唯一 JOIN 模板。同日工作区按此改了校验器和 `payments` 视图的授权，后端测试 145 项通过，改动尚未提交。见 [Genie 的 SQL 形状](../wiki/genie-sql-shape.md)。实现工单是 [#26](https://github.com/zhangzhefang-github/data-agent/issues/26)。
 
 2026-11-21，订单 DuckDB 路径上的提示、授权表和连接键来自同一次已发布语义上下文，不再读取 `orders_space.yaml`。客户标识可以在订单表上分组，也可以出现在已授权连接的客户表一侧。客户记录是否存在以这条等值内连接为准，客户标识非空不能代替。订单 Direct SQL 不再把按问题裁剪的目录工具交给模型。业务关系 `customer_to_order` 用 `dataset_relationship_ids` 指向对应的数据集 JOIN；空间未点名的 JOIN 不会因此进入问数。
 

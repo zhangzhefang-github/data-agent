@@ -16,8 +16,10 @@ spaces:
     dataset_ids:
       - order_mart
       - customer_mart
+      - payment_mart
     relationship_ids:
       - order_mart_customer_mart
+      - payment_mart_order_mart
     metric_aliases:
       order_rows: orders.order_count
     dimension_values:

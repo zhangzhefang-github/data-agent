@@ -76,8 +76,8 @@ def test_orders_context_selects_authorized_terms_and_serializes_without_sensitiv
         "orders.order_date",
         "orders.status",
     ]
-    assert [dataset.id for dataset in context.sql.datasets] == ["customer_mart", "order_mart"]
-    assert [item.id for item in context.sql.relationships] == ["order_mart_customer_mart"]
+    assert [dataset.id for dataset in context.sql.datasets] == ["customer_mart", "order_mart", "payment_mart"]
+    assert [item.id for item in context.sql.relationships] == ["order_mart_customer_mart", "payment_mart_order_mart"]
     assert context.sql.relationships[0].fanout_risk is False
     assert context.sql.relationships[0].join_type == "inner"
     assert context.business.metric_aliases == {"order_rows": "orders.order_count"}
@@ -122,6 +122,7 @@ def test_orders_context_serialization_omits_technical_keys_and_unapproved_fields
     assert "grain" not in dataset
     assert "base_grain" not in payload["business"]["metrics"][0]
     assert set(dataset["columns"]) == {
+        "order_id",
         "customer_id",
         "order_date",
         "status",
@@ -131,10 +132,16 @@ def test_orders_context_serialization_omits_technical_keys_and_unapproved_fields
         "bank_transfer_amount",
         "gift_card_amount",
     }
+    assert set(datasets["payment_mart"]["columns"]) == {
+        "order_id", "payment_method", "amount", "order_date",
+    }
     assert set(datasets["customer_mart"]["columns"]) == {"customer_id"}
     serialized = context.model_dump_json()
-    assert "order_id" not in serialized
+    assert "first_name" not in serialized
     assert payload["sql"]["relationships"][0]["source_fields"] == ["customer_id"]
+    payment_relationship = next(item for item in payload["sql"]["relationships"] if item["id"] == "payment_mart_order_mart")
+    assert payment_relationship["source_fields"] == ["order_id"]
+    assert payment_relationship["fanout_risk"] is True
     assert context.business.metrics[0].base_grain == ["order_id"]
 
 

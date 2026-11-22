@@ -45,6 +45,15 @@ def order_chat(monkeypatch, tmp_path):
         db.execute("INSERT INTO customers VALUES (12), (13), (14), (15), (16), (17), (18), (19), (20)")
         # 客户标识有值，但客户表没有这一行。不能把非空当成客户记录存在。
         db.execute("INSERT INTO orders VALUES ('2016-06-01', 'placed', 1, 1, 0, 0, 0, 999)")
+        db.execute("ALTER TABLE orders ADD COLUMN order_id INTEGER")
+        db.execute("""
+            CREATE TABLE payments (
+                order_id INTEGER,
+                payment_method VARCHAR,
+                amount DOUBLE,
+                order_date DATE
+            )
+        """)
 
     class BusinessClock(datetime):
         @classmethod
@@ -79,7 +88,8 @@ def order_chat(monkeypatch, tmp_path):
             assert "方言版本：v" in prompt
             assert "sales_transactions" in prompt
             assert "WITH weekly_sales" not in prompt
-            assert "不要使用 WITH" in prompt
+            assert "可以用 WITH、子查询、JOIN、GROUP BY 和窗口函数" in prompt
+            assert "不要使用 WITH" not in prompt
             assert "本次授权的表：" in prompt
             authorized = prompt.split("本次授权的表：", 1)[1].split("授权关系：", 1)[0]
             objects = prompt.split("业务对象：", 1)[1].split("本次授权的表：", 1)[0]
@@ -114,8 +124,9 @@ def order_chat(monkeypatch, tmp_path):
             assert "第一季度是 1–3 月" in prompt
             assert "不要再与 amount 相加" in prompt
             assert "基础粒度是单笔订单" in prompt
-            assert "支付明细未授权" in prompt
-            assert "order_id" not in prompt
+            assert "支付明细要先按 order_id 汇总" in prompt
+            assert "main.payments" in authorized
+            assert "stg_payments" not in prompt
             return Run()
 
         tool = None
@@ -378,7 +389,9 @@ def test_scope_question_returns_the_authorized_range_without_the_model(order_cha
     assert "等值内连接" in text
     assert "某个日期区间的订单笔数和订单金额" in text
     assert "first_name" not in text
-    assert "order_id" not in text
+    assert "支付明细（payments）" in text
+    assert "关联可能放大行数" in text
+    assert "stg_" not in text
     assert stored["messages"][1]["content"] == text
     assert stored["messages"][1]["result"] is None
 
@@ -485,7 +498,7 @@ def test_large_space_supplements_an_authorized_dataset_then_revalidates(order_ch
 
 def test_large_space_still_rejects_an_unauthorized_dataset(order_chat, monkeypatch):
     monkeypatch.setattr(main, "is_small_space", lambda context: False)
-    payments = "SELECT COUNT(*) AS order_rows FROM orders JOIN payments ON orders.order_id = payments.order_id"
+    payments = "SELECT COUNT(*) AS order_rows FROM orders JOIN stg_payments ON orders.order_id = stg_payments.order_id"
     with TestClient(main.app) as client:
         events, replies = order_chat(client, [payments, HISTORICAL], "订单笔数是多少", check_prompt=False)
     assert replies == []

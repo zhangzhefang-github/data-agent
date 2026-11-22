@@ -108,6 +108,7 @@ _RELATIONSHIPS = {
     "order_mart_to_customer_mart": ("order_mart", "customer_mart", "orders", "customers", "customer_id", "customer_id"),
     "order_staging_to_customer_staging": ("order_staging", "customer_staging", "stg_orders", "stg_customers", "customer_id", "customer_id"),
     "order_source_to_customer_source": ("order_source", "customer_source", "raw_orders", "raw_customers", "user_id", "id"),
+    "payment_mart_to_order_mart": ("payment_mart", "order_mart", "payments", "orders", "order_id", "order_id"),
     "payment_staging_to_order_staging": ("payment_staging", "order_staging", "stg_payments", "stg_orders", "order_id", "order_id"),
     "payment_source_to_order_source": ("payment_source", "order_source", "raw_payments", "raw_orders", "order_id", "id"),
 }

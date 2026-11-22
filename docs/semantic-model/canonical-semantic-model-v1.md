@@ -15,4 +15,4 @@ Jaffle Shop 模型具有 8 个真实数据集、Customer、Order、Payment 三�
 
 每个诊断包含对象、字段、代码、原因和修复建议。Hard Error 会阻止发布。真实物理 Catalog 由外部只读接口作为显式输入传入校验器，连接配置不属于模型。
 
-`profiled` 只记录只读数据探查证据。查询计划还需要点名一条获授权的 `confirmed` 数据集关系。`validate_dataset_join` 拒绝未声明、未授权、同优先级歧义及未处理 Fanout 的关联。存在 Fanout 风险时，来源必须先聚合回其声明粒度。
+`profiled` 只记录只读数据探查证据。查询计划还需要点名一条获授权的 `confirmed` 数据集关系。`validate_dataset_join` 拒绝未声明、未授权、同优先级歧义及未处理 Fanout 的关联。存在 Fanout 风险时，来源必须先聚合回其声明粒度。2026-11-22，[ADR 0007](../adr/0007-readonly-sql-with-fanout.md) 规定这步预聚合写在同一条只读查询的 WITH 或子查询里，连接本身不必先从 SQL 里拿掉。

@@ -64,7 +64,8 @@ def test_orders_catalog_is_projected_from_the_published_semantic_model():
         {"name": "退货中", "value": "return_pending"},
         {"name": "已退货", "value": "returned"},
     ]
-    assert "customers" not in json.dumps(catalog, ensure_ascii=False)
+    assert catalog["models"].keys() == {"order_mart"}
+    assert {item["table"] for item in catalog["physical_tables"]} >= {"orders", "customers", "payments"}
     assert "raw_orders" not in json.dumps(catalog, ensure_ascii=False)
 
 

@@ -21,6 +21,10 @@ def validate_semantic_model(
 
     for dataset in model.datasets:
         field_ids = {field.id for field in dataset.fields}
+        if len(field_ids) != len(dataset.fields):
+            _error(diagnostics, dataset.id, "fields", "duplicate_id",
+                   "Field IDs must be unique within a dataset.",
+                   "Choose a stable field ID that is unused in this dataset.")
         _require_members(dataset.id, "grain", dataset.grain, field_ids, "unknown_field", diagnostics)
         _require_members(dataset.id, "primary_key", dataset.primary_key, field_ids, "unknown_field", diagnostics)
         _require_member(dataset.id, "physical_mapping.data_source_id", dataset.physical_mapping.data_source_id,
@@ -29,6 +33,11 @@ def validate_semantic_model(
             _validate_catalog_mapping(dataset, catalog_objects, diagnostics)
 
     for business_object in model.business_objects:
+        attribute_ids = [item.id for item in business_object.attributes]
+        if len(set(attribute_ids)) != len(attribute_ids):
+            _error(diagnostics, business_object.id, "attributes", "duplicate_id",
+                   "Attribute IDs must be unique within a business object.",
+                   "Choose a stable attribute ID that is unused on this object.")
         _require_members(business_object.id, "dataset_ids", business_object.dataset_ids, dataset_ids,
                          "unknown_dataset", diagnostics)
 

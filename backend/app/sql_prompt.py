@@ -38,6 +38,9 @@ def _authorized_joins(context: SemanticContext) -> set[tuple[tuple[str, str], tu
     physical = {dataset.id: dataset.physical_object.lower() for dataset in context.sql.datasets}
     keys = set()
     for relationship in context.sql.relationships:
+        # Fanout 关系可以出现在查询里，但不因此变成免检的等值连接。
+        if relationship.fanout_risk:
+            continue
         if len(relationship.source_fields) != 1 or len(relationship.target_fields) != 1:
             continue
         source_column = columns[relationship.source_dataset_id][relationship.source_fields[0]].lower()
@@ -114,7 +117,7 @@ def render_direct_sql_prompt(
     return (
         f"方言版本：{database['version']}\n"
         f"方言规则：\n{rules}\n"
-        f"经典示例（只说明方言写法，不要模仿其中的 WITH、子查询、DISTINCT 或 date_trunc，其中的表也不一定已授权）：\n{example}\n"
+        f"经典示例（只说明方言写法，其中的表不一定已授权）：\n{example}\n"
         f"业务对象：{[{'id': item.id, 'name': item.name} for item in context.business.objects]}\n"
         f"本次授权的表：{database['tables']}\n"
         f"授权关系：{relationships}\n"
@@ -126,16 +129,15 @@ def render_direct_sql_prompt(
         "可查询范围（用户询问能查什么、有哪些数据或可以问什么时，只回复下面这段原文，不要调用工具，也不要改写。"
         "示例问题只说明问法，其中的日期不要套用到用户没有说出的时间上）：\n"
         f"{render_query_scope(context)}\n"
-        "本次查询约束：直接查询本次授权的表，只提交一条 SELECT。"
-        "不要使用 WITH、子查询、DISTINCT、QUALIFY、date_trunc，也不要模仿经典示例的这些写法。"
-        "筛选和分组只能使用授权维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
+        "本次查询约束：直接查询本次授权的表，只提交一条只读 SELECT。"
+        "可以用 WITH、子查询、JOIN、GROUP BY 和窗口函数。"
+        "筛选和分组可以使用授权维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
         "有状态字典的维度在 WHERE 中使用字典里的字面量，不要用 CASE 翻译。"
         "维度列在 SELECT 和 GROUP BY 中必须使用授权维度的 column，不要另起别名。"
-        "是否关联由问题决定，只使用授权关系中的等值内连接。"
-        "查询必须从订单表开始。统计客户数时按客户标识分组，并使用订单笔数，不要单独查询客户表，也不要对客户标识做 COUNT。"
+        "空间内列出的表可以连接。统计客户数时按客户标识分组，并使用订单笔数，不要单独查询客户表，也不要对客户标识做 COUNT。"
         "指标表达式和结果别名必须与授权指标完全一致，不要相减或改写。"
         "已发布订单指标的基础粒度是单笔订单。"
-        "支付明细未授权，不能把订单行和支付行连接后再汇总订单金额。"
+        "支付明细要先按 order_id 汇总，再与订单连接。不要在未汇总的支付行上计算订单笔数或订单金额。"
     )
 
 
@@ -175,12 +177,12 @@ def render_two_phase_prompt(
         f"方言版本：{database['version']}\n"
         f"方言规则：\n{rules}\n"
         f"{body}\n"
-        "本次查询约束：直接查询本次展开的表，只提交一条 SELECT。"
-        "不要使用 WITH、子查询、DISTINCT、QUALIFY、date_trunc。"
-        "筛选和分组只能使用已展开维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
-        "查询必须从订单表开始。指标表达式和结果别名必须与已展开指标完全一致。"
-        "只使用已展开关系中的等值内连接。内连接会丢掉对端没有匹配的行。"
-        "fanout_risk 为真的关系不能用于汇总。支付明细未授权时不能连接支付行。"
+        "本次查询约束：直接查询本次展开的表，只提交一条只读 SELECT。"
+        "可以用 WITH、子查询、JOIN、GROUP BY 和窗口函数。"
+        "筛选和分组可以使用已展开维度中的列。时间维度用 DATE 'YYYY-MM-DD'。"
+        "指标表达式和结果别名必须与已展开指标完全一致。"
+        "已展开的表可以连接。内连接会丢掉对端没有匹配的行。"
+        "fanout_risk 为真时，先按订单汇总支付明细，再计算订单笔数和订单金额。"
     )
 
 

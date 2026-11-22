@@ -255,6 +255,66 @@ def test_reviewed_window_is_accepted_at_the_order_chat_entry(monkeypatch, tmp_pa
     assert jaffle_shop_path.read_bytes() == before
 
 
+def test_with_preaggregated_payments_keeps_order_and_payment_totals(jaffle_shop_path: Path):
+    sql = """
+        WITH paid AS (
+            SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount
+            FROM payments
+            GROUP BY order_id
+        )
+        SELECT COUNT(*) AS order_rows,
+               SUM(o.amount) AS order_amount,
+               SUM(paid.payment_rows) AS payment_rows,
+               SUM(paid.payment_amount) AS payment_amount
+        FROM orders AS o
+        JOIN paid ON paid.order_id = o.order_id
+        WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+    """
+
+    result = _run(jaffle_shop_path, sql)
+
+    assert result["rows"] == [[99, 1672.0, 113, 1672.0]]
+
+
+def test_payment_method_cte_can_use_a_different_grouping(jaffle_shop_path: Path):
+    sql = """
+        WITH paid AS (
+            SELECT order_id, payment_method, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount
+            FROM payments
+            GROUP BY order_id, payment_method
+        )
+        SELECT paid.payment_method,
+               SUM(paid.payment_rows) AS payment_rows,
+               SUM(paid.payment_amount) AS payment_amount
+        FROM paid
+        JOIN orders AS o ON o.order_id = paid.order_id
+        WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+        GROUP BY paid.payment_method
+        ORDER BY paid.payment_method
+    """
+
+    result = _run(jaffle_shop_path, sql)
+
+    assert result["rows"] == [
+        ["bank_transfer", 33, 411.0],
+        ["coupon", 13, 185.0],
+        ["credit_card", 55, 871.0],
+        ["gift_card", 12, 205.0],
+    ]
+
+
+def test_bare_payment_join_does_not_execute_inflated_order_amount(jaffle_shop_path: Path):
+    sql = """
+        SELECT SUM(o.amount) AS order_amount
+        FROM orders AS o
+        JOIN payments AS p ON p.order_id = o.order_id
+        WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+    """
+
+    with pytest.raises(SqlRejected, match="支付明细"):
+        _run(jaffle_shop_path, sql)
+
+
 def test_direct_sql_rejects_month_nps_and_payment_fanout(jaffle_shop_path: Path):
     before = jaffle_shop_path.read_bytes()
     month = "SELECT date_trunc('month', order_date) AS month, SUM(amount) AS order_amount FROM orders GROUP BY 1"

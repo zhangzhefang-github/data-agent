@@ -1,4 +1,4 @@
-"""Validate and execute the order Space's single-table DuckDB SQL."""
+"""Validate and execute one read-only DuckDB SELECT for the order Space."""
 
 from datetime import date, datetime
 from decimal import Decimal
@@ -207,6 +207,214 @@ def _dimension_column(node, names, qualifier: str, aliases: dict[str, str], anch
     return bool(physical and physical != anchor and node.name.lower() in join_keys.get(physical, ()))
 
 
+_ORDER_AMOUNT_COLUMNS = {
+    "amount", "credit_card_amount", "coupon_amount", "bank_transfer_amount", "gift_card_amount",
+}
+
+
+def _cte_queries(select: exp.Select) -> dict[str, exp.Select]:
+    with_ = select.args.get("with")
+    if with_ is None:
+        return {}
+    queries = {}
+    for cte in with_.expressions:
+        body = cte.this
+        if not isinstance(body, exp.Select):
+            raise SqlRejected("WITH 里只写 SELECT")
+        queries[cte.alias_or_name.lower()] = body
+    return queries
+
+
+def _needs_flexible_sql(tree: exp.Select, catalog: dict) -> bool:
+    if tree.args.get("with") or tree.args.get("distinct") or tree.args.get("qualify"):
+        return True
+    fanouts = {item["table"] for item in catalog.get("fanouts", [])}
+    cte_names = set(_cte_queries(tree))
+    for node in tree.walk():
+        if isinstance(node, (exp.Subquery, exp.Window)):
+            return True
+        if isinstance(node, exp.Table) and node.name.lower() in fanouts and node.name.lower() not in cte_names:
+            return True
+    return False
+
+
+def _from_items(select: exp.Select) -> list:
+    items = []
+    source = select.args.get("from")
+    if source is not None:
+        items.append(source.this)
+    for join in select.args.get("joins") or []:
+        items.append(join.this)
+    return items
+
+
+def _grouped_to_key(select: exp.Select, key: str) -> bool:
+    group = select.args.get("group")
+    if group is None:
+        return False
+    names = []
+    for expression in group.expressions:
+        if not isinstance(expression, exp.Column):
+            return False
+        names.append(expression.name.lower())
+    return names == [key]
+
+
+def _analyze_select(select, ctes, fanouts, order_table, cache):
+    identity = id(select)
+    if identity in cache:
+        return cache[identity]
+    multiplies = False
+    reads_orders = False
+    aliases = {}
+    for item in _from_items(select):
+        item_multiplies, item_reads_orders, item_aliases = _analyze_from_item(
+            item, ctes, fanouts, order_table, cache,
+        )
+        multiplies = multiplies or item_multiplies
+        reads_orders = reads_orders or item_reads_orders
+        aliases.update(item_aliases)
+    output_multiplies = False if _grouped_to_key(select, "order_id") else multiplies
+    cache[identity] = (multiplies, reads_orders, aliases, output_multiplies)
+    return cache[identity]
+
+
+def _analyze_from_item(item, ctes, fanouts, order_table, cache):
+    if isinstance(item, exp.Subquery):
+        if not isinstance(item.this, exp.Select):
+            raise SqlRejected("子查询只写 SELECT")
+        multiplies, reads_orders, _, output_multiplies = _analyze_select(
+            item.this, ctes, fanouts, order_table, cache,
+        )
+        alias = (item.alias_or_name or "").lower()
+        return output_multiplies, reads_orders, ({alias: "subquery"} if alias else {})
+    if not isinstance(item, exp.Table):
+        raise SqlRejected("查询包含未授权的表关联")
+    name = item.name.lower()
+    alias = (item.alias or name).lower()
+    labels = {alias: name, name: name}
+    if name in ctes:
+        _, _, _, output_multiplies = _analyze_select(ctes[name], ctes, fanouts, order_table, cache)
+        _, reads_orders, _, _ = _analyze_select(ctes[name], ctes, fanouts, order_table, cache)
+        return output_multiplies, reads_orders, labels
+    if name == order_table:
+        return False, True, labels
+    if name in fanouts:
+        return True, False, labels
+    return False, False, labels
+
+
+def _local_aggregates(select: exp.Select) -> list:
+    found = []
+
+    def visit(node, nested: bool) -> None:
+        if nested:
+            return
+        if isinstance(node, (exp.Sum, exp.Count)):
+            found.append(node)
+        for child in node.iter_expressions():
+            visit(child, nested or (isinstance(child, exp.Select) and child is not select))
+
+    visit(select, False)
+    return found
+
+
+def _is_order_measure(node, aliases: dict[str, str], order_table: str) -> bool:
+    if isinstance(node, exp.Count):
+        return isinstance(node.this, exp.Star) and not node.expressions
+    if not isinstance(node, exp.Sum) or not isinstance(node.this, exp.Column):
+        return False
+    if node.this.name.lower() not in _ORDER_AMOUNT_COLUMNS:
+        return False
+    qualifier = node.this.table.lower()
+    if not qualifier:
+        return True
+    return aliases.get(qualifier, qualifier) == order_table
+
+
+def _reject_multiplied_order_measures(tree: exp.Select, ctes, fanouts, order_table) -> None:
+    cache = {}
+    for select in tree.find_all(exp.Select):
+        multiplies, reads_orders, aliases, _ = _analyze_select(select, ctes, fanouts, order_table, cache)
+        if not (multiplies and reads_orders):
+            continue
+        if any(_is_order_measure(node, aliases, order_table) for node in _local_aggregates(select)):
+            raise SqlRejected("订单笔数和订单金额要先把支付明细按订单汇总，再连接。未汇总的支付连接会放大订单行")
+
+
+def _collect_order_dates(tree: exp.Select) -> list[exp.Literal]:
+    dates = []
+    for node in tree.find_all(exp.Between, *COMPARISONS):
+        column = node.this
+        if not isinstance(column, exp.Column) or column.name.lower() != "order_date":
+            continue
+        values = [node.args["low"], node.args["high"]] if isinstance(node, exp.Between) else [node.expression]
+        for value in values:
+            try:
+                dates.append(_date_literal(value))
+            except SqlCorrection:
+                continue
+    return dates
+
+
+def _rewrite_status_literals(tree: exp.Select, catalog: dict) -> None:
+    dimension = catalog.get("dimensions", {}).get("status")
+    if not dimension or not dimension.get("values"):
+        return
+    for node in tree.find_all(exp.EQ, exp.NEQ, exp.In):
+        column = node.this
+        if not isinstance(column, exp.Column) or column.name.lower() != "status":
+            continue
+        values = node.expressions if isinstance(node, exp.In) else [node.expression]
+        for value in values:
+            if not isinstance(value, exp.Literal) or not value.is_string:
+                continue
+            try:
+                value.set("this", physical_value(dimension, value.this))
+            except ValueError as exc:
+                raise SqlCorrection("订单状态须使用授权字典") from exc
+
+
+def _cap_limit(tree: exp.Select) -> None:
+    limit = tree.args.get("limit")
+    if limit:
+        value = limit.expression
+        if not isinstance(limit, exp.Limit) or not isinstance(value, exp.Literal) or not value.is_int or int(value.this) < 0:
+            raise SqlRejected("LIMIT 必须为非负整数")
+        cap = min(int(value.this), MAX_ROWS)
+    else:
+        cap = MAX_ROWS
+    tree.set("limit", exp.Limit(expression=exp.Literal.number(cap)))
+
+
+def _validate_flexible_sql(tree: exp.Select, catalog: dict):
+    if any(isinstance(expression, exp.Star) for expression in tree.expressions):
+        raise SqlCorrection("请写出明确的结果列")
+    order_table = _order_table(catalog)["table"]
+    physical = {item["table"] for item in catalog.get("physical_tables", [])}
+    physical.add(order_table)
+    fanouts = {
+        item["table"]: item["key"]
+        for item in catalog.get("fanouts", [])
+        if item["anchor"] == order_table
+    }
+    ctes = _cte_queries(tree)
+    for table in tree.find_all(exp.Table):
+        name = table.name.lower()
+        if name in ctes:
+            continue
+        if name not in physical:
+            raise SqlRejected("查询包含未授权的表")
+        table.set("db", exp.to_identifier("main"))
+    _reject_multiplied_order_measures(tree, ctes, fanouts, order_table)
+    _rewrite_status_literals(tree, catalog)
+    _cap_limit(tree)
+    columns = [expression.alias_or_name.lower() for expression in tree.expressions]
+    if len(set(columns)) != len(columns):
+        raise SqlCorrection("请使用唯一的结果列名")
+    return tree, columns, _collect_order_dates(tree)
+
+
 def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     if not sql.strip():
         raise SqlCorrection("请提交一条 DuckDB SELECT")
@@ -219,6 +427,8 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     if len(statements) != 1 or not isinstance(statements[0], exp.Select):
         raise SqlRejected("只允许单条 SELECT 查询")
     tree = statements[0]
+    if _needs_flexible_sql(tree, catalog):
+        return _validate_flexible_sql(tree, catalog)
     supported = {"expressions", "from", "joins", "where", "group", "order", "limit", "having"}
     if any(value and key not in supported for key, value in tree.args.items()):
         raise SqlRejected("订单查询只支持单表汇总或已授权的等值关联")
