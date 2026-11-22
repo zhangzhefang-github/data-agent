@@ -350,15 +350,26 @@ def main():
     parser = argparse.ArgumentParser(description='Run a golden dataset.')
     parser.add_argument('--live', action='store_true', help='调用真实模型评测销售主题空间的自然语言解析')
     parser.add_argument('--orders', action='store_true', help='评测订单主题空间的 Direct SQL')
+    parser.add_argument('--platform', choices=('deterministic', 'model', 'live'), help='用一种模式运行订单平台数据集，不改变 --orders')
+    parser.add_argument('--split', choices=('dev', 'validation', 'holdout'), help='只运行订单平台数据集的一个分组')
     parser.add_argument('--case', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if args.orders:
+    if args.platform and args.orders:
+        parser.error('不能同时选择旧订单评测和订单平台模式')
+    if args.split and not args.platform:
+        parser.error('--split 只用于订单平台模式')
+    if args.platform == 'model':
+        parser.error('model 模式需要在进程内传入 Runner，命令行请使用 --platform live')
+    if args.platform:
+        from app.evaluation.platform_run import run_orders_platform
+        report = run_orders_platform(args.platform, split=args.split)
+    elif args.orders:
         report = run_orders(args.case)
     elif args.live:
         report = run_live(args.case)
     else:
         report = run_deterministic()
-    if report.get('mode') == 'orders':
+    if report.get('mode') == 'orders' or (report.get('cases') and 'evaluation_status' in report['cases'][0]):
         counts = orders_summary(report['cases'])
         exit_code = 1 if counts['FAIL'] or counts['ERROR'] else 0
     else:
