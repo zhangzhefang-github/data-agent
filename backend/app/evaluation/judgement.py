@@ -115,6 +115,8 @@ def _score_success(observation, expected):
     if expect == 'rejected':
         rows = [] if not isinstance(result, dict) else (result.get('rows') or [])
         return _verdict('success', 'FAIL', leaked=1 if rows else 0, failure_stage='rejection')
+    if expect == 'clarification':
+        return _verdict('success', 'FAIL', failure_stage='clarification')
     if expect == 'scope':
         actual = (observation.get('text') or '').strip()
         wanted = (expected.get('scope_text') or '').strip()
