@@ -100,10 +100,23 @@ def test_orders_dataset_scores_rows_aggregates_rejection_and_followup():
     }})
     assert passed_customers['status'] == 'passed'
 
-    assert score_orders_case(cases['reject_average'], {'error': True, 'done': 'failed'})['status'] == 'passed'
-    assert score_orders_case(cases['reject_payment_join'], {'result': {
+    bare_error = score_orders_case(cases['reject_average'], {'error': True, 'done': 'failed'})
+    assert bare_error['evaluation_status'] == 'ERROR'
+    assert bare_error['execution_status'] == 'model_error'
+    refused = score_orders_case(cases['reject_average'], {
+        'text': '平均订单金额尚未发布，不能返回结果',
+        'done': 'completed',
+    })
+    assert refused['execution_status'] == 'refused'
+    assert refused['evaluation_status'] == 'PASS'
+    assert refused['status'] == 'passed'
+    leaked = score_orders_case(cases['reject_payment_join'], {'result': {
         'columns': ['order_amount'], 'rows': [[1672.0]], 'sql': 'SELECT SUM(amount)',
-    }})['failure_stage'] == 'rejection'
+    }})
+    assert leaked['failure_stage'] == 'rejection'
+    assert leaked['execution_status'] == 'success'
+    assert leaked['evaluation_status'] == 'FAIL'
+    assert leaked['leaked'] == 1
 
     followup = score_orders_case(cases['previous_period'], {'result': {
         'columns': ['order_rows', 'order_amount'],
@@ -133,9 +146,12 @@ def test_orders_evaluation_skips_without_duckdb_or_model_key(monkeypatch):
     assert skipped['reason'] == 'SALES_DUCKDB_PATH 未设置'
 
     monkeypatch.setenv('SALES_DUCKDB_PATH', '/tmp/jaffle_shop.duckdb')
-    skipped_model = runner.run_orders('window_totals')['cases'][0]
+    skipped_report = runner.run_orders('window_totals')
+    skipped_model = skipped_report['cases'][0]
     assert skipped_model['status'] == 'skipped'
+    assert skipped_model['evaluation_status'] == 'SKIPPED'
     assert skipped_model['reason'] == 'OPENAI_API_KEY 未设置'
+    assert skipped_report['summary']['PASS'] == 0
 
 
 def test_orders_evaluation_uses_the_order_duckdb_not_the_sales_fixture(monkeypatch):
@@ -155,9 +171,45 @@ def test_orders_evaluation_uses_the_order_duckdb_not_the_sales_fixture(monkeypat
     monkeypatch.setattr(runner, 'send', fake_send)
     report = runner.run_orders('window_totals')
     assert report['mode'] == 'orders'
-    assert report['cases'][0]['status'] == 'failed'
-    assert report['cases'][0]['failure_stage'] == 'semantic_resolution'
+    assert report['cases'][0]['evaluation_status'] == 'ERROR'
+    assert report['cases'][0]['execution_status'] == 'model_error'
+    assert report['cases'][0]['failure_stage'] is None
+    assert report['summary']['PASS'] == 0
     assert main.DATABASE_URL == 'postgresql://example.invalid/enterprise'
+
+
+def test_orders_timeout_and_empty_process_output_are_not_correct_refusals(monkeypatch):
+    import subprocess
+
+    from app.evaluation import runner
+
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
+    monkeypatch.setenv('SALES_DUCKDB_PATH', '/tmp/jaffle_shop.duckdb')
+
+    def time_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd='runner', timeout=120)
+
+    monkeypatch.setattr(runner.subprocess, 'run', time_out)
+    timed_out = runner.run_orders()
+    rejected = next(case for case in timed_out['cases'] if case['id'] == 'reject_average')
+    business = next(case for case in timed_out['cases'] if case['id'] == 'window_totals')
+    assert rejected['execution_status'] == 'timeout'
+    assert rejected['evaluation_status'] == 'ERROR'
+    assert business['execution_status'] == 'timeout'
+    assert business['evaluation_status'] == 'ERROR'
+    assert timed_out['summary']['PASS'] == 0
+    assert timed_out['summary']['ERROR'] == len(timed_out['cases'])
+
+    def no_output(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 2, stdout='', stderr='')
+
+    monkeypatch.setattr(runner.subprocess, 'run', no_output)
+    empty = runner.run_orders()
+    missing = next(case for case in empty['cases'] if case['id'] == 'reject_staging')
+    assert missing['execution_status'] == 'invalid_output'
+    assert missing['evaluation_status'] == 'ERROR'
+    assert empty['summary']['PASS'] == 0
+    assert empty['summary']['ERROR'] == len(empty['cases'])
 
 
 def test_orders_scope_question_returns_the_authorization_text(monkeypatch, tmp_path):

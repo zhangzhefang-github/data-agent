@@ -11,6 +11,7 @@ from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
+from app.evaluation.judgement import judge
 from app.query import Query, execute_query
 
 DATASET = Path(__file__).with_name('golden.json')
@@ -184,109 +185,64 @@ def run_live(case_id=None):
     return {'mode': 'live', 'clock': dataset['clock'], 'cases': reports}
 
 
-def _same_value(actual, expected):
-    if isinstance(actual, bool) or isinstance(expected, bool):
-        return actual == expected
-    if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
-        return float(actual) == float(expected)
-    return actual == expected
+_LEGACY_STATUS = {'PASS': 'passed', 'FAIL': 'failed', 'ERROR': 'error', 'SKIPPED': 'skipped'}
 
 
-def _canonical_row(row):
-    return tuple(_canonical_value(value) for value in row)
-
-
-def _canonical_value(value):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return value
-    number = float(value)
-    return int(number) if number.is_integer() else number
-
-
-def _rows_equal(actual, expected):
-    if actual is None or len(actual) != len(expected):
-        return False
-    return sorted(map(_canonical_row, actual)) == sorted(map(_canonical_row, expected))
-
-
-def _project_rows(result, columns):
-    actual_columns = result.get('columns') or []
-    if set(actual_columns) != set(columns):
-        return None
-    index = {name: position for position, name in enumerate(actual_columns)}
-    try:
-        return [[row[index[name]] for name in columns] for row in result.get('rows') or []]
-    except (IndexError, KeyError, TypeError):
-        return None
+def orders_summary(cases):
+    return {name: sum(case.get('evaluation_status') == name for case in cases) for name in ('PASS', 'FAIL', 'ERROR', 'SKIPPED')}
 
 
 def score_orders_case(case, response, scope_text=None):
-    """按结果行、拒绝或同期日期打分。不要求 SQL 原文一致。"""
-    result = response.get('result')
-    report = {
-        'id': case['id'],
-        'question': case['question'],
-        'standard_logic': case['standard_logic'],
-        'sql': None if result is None else result.get('sql'),
-        'actual_columns': None if result is None else result.get('columns'),
-        'actual_rows': None if result is None else result.get('rows'),
-        'status': 'failed',
-        'failure_stage': None,
-    }
-    expect = case['expect']
-    if expect == 'rejected':
-        if result is None:
-            report['status'] = 'passed'
-        else:
-            report['failure_stage'] = 'rejection'
-        return report
-    if expect == 'scope':
-        if (response.get('text') or '').strip() != (scope_text or '').strip():
-            report['failure_stage'] = 'result'
-            report['actual_text'] = response.get('text')
-            return report
-        report['status'] = 'passed'
-        return report
-    if result is None:
-        report['failure_stage'] = 'semantic_resolution'
-        return report
-    if expect == 'followup':
-        sql = result.get('sql') or ''
-        if any(token not in sql for token in case['sql_contains']) or not _rows_equal(result.get('rows'), case['rows']):
-            report['failure_stage'] = 'prior_period'
-            return report
-        report['status'] = 'passed'
-        return report
-    if expect == 'aggregates':
-        projected = _project_rows(result, case['columns'])
-        if projected is None or len(projected) != case['row_count']:
-            report['failure_stage'] = 'result'
-            return report
-        index = {name: position for position, name in enumerate(case['columns'])}
-        for name, expected in case['sums'].items():
-            try:
-                total = sum(row[index[name]] for row in projected)
-            except TypeError:
-                report['failure_stage'] = 'result'
-                return report
-            if not _same_value(total, expected):
-                report['failure_stage'] = 'result'
-                return report
-        report['status'] = 'passed'
-        return report
-    projected = _project_rows(result, case['columns'])
-    if projected is None or not _rows_equal(projected, case['rows']):
-        report['failure_stage'] = 'result'
-        return report
-    report['status'] = 'passed'
+    """按执行状态和评测结果给订单用例打分。不要求 SQL 原文一致。"""
+    expected = case if scope_text is None else {**case, 'scope_text': scope_text}
+    report = _order_report(case, _observation_from_response(response), response=response, expected=expected)
+    if case['expect'] == 'scope' and report['evaluation_status'] == 'FAIL':
+        report['actual_text'] = response.get('text')
     return report
 
 
+def _observation_from_response(response):
+    return {
+        'result': response.get('result'),
+        'text': response.get('text'),
+        'error': response.get('error'),
+        'done': response.get('done'),
+    }
+
+
+def _order_report(case, observation, reason=None, response=None, expected=None):
+    verdict = judge(observation, case if expected is None else expected)
+    result = observation.get('result') if response is None else response.get('result')
+    report = {
+        'id': case['id'],
+        'question': case['question'],
+        'standard_logic': case.get('standard_logic'),
+        'sql': None if result is None else result.get('sql'),
+        'actual_columns': None if result is None else result.get('columns'),
+        'actual_rows': None if result is None else result.get('rows'),
+        'execution_status': verdict['execution_status'],
+        'evaluation_status': verdict['evaluation_status'],
+        'status': _LEGACY_STATUS[verdict['evaluation_status']],
+        'failure_stage': verdict.get('failure_stage'),
+        'leaked': verdict.get('leaked', 0),
+    }
+    if reason:
+        report['reason'] = reason
+    return report
+
+
+def _orders_result(cases):
+    return {'mode': 'orders', 'cases': cases, 'summary': orders_summary(cases)}
+
+
 def _skipped_order_case(case, reason):
+    verdict = judge({'skipped': True, 'missing_api_key': reason == 'OPENAI_API_KEY 未设置'}, case)
     return {
         'id': case['id'],
         'question': case['question'],
         'status': 'skipped',
+        'evaluation_status': verdict['evaluation_status'],
+        'execution_status': verdict['execution_status'],
         'failure_stage': 'configuration',
         'reason': reason,
     }
@@ -317,17 +273,17 @@ def run_orders(case_id=None):
                     raise ValueError('评测进程异常退出')
                 report = json.loads(process.stdout)['cases'][0]
             except subprocess.TimeoutExpired:
-                report = {'id': case['id'], 'status': 'failed', 'failure_stage': 'semantic_resolution', 'reason': '模型请求超过120秒'}
+                report = _order_report(case, {'timeout': True}, reason='模型请求超过120秒')
             except (ValueError, KeyError, IndexError, json.JSONDecodeError):
-                report = {'id': case['id'], 'status': 'failed', 'failure_stage': 'semantic_resolution', 'reason': '评测进程未返回有效结果'}
+                report = _order_report(case, {'no_model_result': True}, reason='评测进程未返回有效结果')
             reports.append(report)
             print(json.dumps(report, ensure_ascii=False), file=sys.stderr, flush=True)
-        return {'mode': 'orders', 'cases': reports}
+        return _orders_result(reports)
 
     reason = _orders_skip_reason(cases[0])
     if reason:
-        return {'mode': 'orders', 'cases': [_skipped_order_case(cases[0], reason)]}
-    return {'mode': 'orders', 'cases': [_execute_orders_case(cases[0])]}
+        return _orders_result([_skipped_order_case(cases[0], reason)])
+    return _orders_result([_execute_orders_case(cases[0])])
 
 
 def _orders_skip_reason(case):
@@ -354,13 +310,10 @@ def _execute_orders_case(case):
                 if 'previous_question' in case:
                     initial = send(client, case['previous_question'])
                     if not initial.get('conversation_id') or not initial.get('result'):
-                        return {
-                            'id': case['id'],
-                            'question': case['question'],
-                            'status': 'failed',
-                            'failure_stage': 'semantic_resolution',
-                            'reason': '前一轮查询失败',
-                        }
+                        observation = _observation_from_response(initial)
+                        if not initial.get('error') and not initial.get('text') and not initial.get('result'):
+                            observation['no_model_result'] = True
+                        return _order_report(case, observation, reason='前一轮查询失败')
                     response = send(client, case['question'], initial['conversation_id'])
                 else:
                     response = send(client, case['question'])
@@ -389,7 +342,7 @@ def send(client, question, conversation_id=None):
         elif event == 'done':
             result['done'] = payload.get('status')
         elif event == 'error':
-            result['error'] = True
+            result['error'] = payload if isinstance(payload, dict) else True
     return result
 
 
@@ -405,10 +358,15 @@ def main():
         report = run_live(args.case)
     else:
         report = run_deterministic()
-    counts = {status: sum(case['status'] == status for case in report['cases']) for status in ('passed', 'failed', 'skipped')}
+    if report.get('mode') == 'orders':
+        counts = orders_summary(report['cases'])
+        exit_code = 1 if counts['FAIL'] or counts['ERROR'] else 0
+    else:
+        counts = {status: sum(case['status'] == status for case in report['cases']) for status in ('passed', 'failed', 'skipped')}
+        exit_code = 1 if counts['failed'] else 0
     report['summary'] = counts
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 1 if counts['failed'] else 0
+    return exit_code
 
 
 if __name__ == '__main__':
