@@ -20,6 +20,7 @@ def write_run_manifest(run, snapshot, *, run_id, started_at, repo_root=None):
     """从平台运行和订单语义快照写出 var/evaluation-runs/<run_id>.json。"""
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
     provider, model_name, model_version = _model_identity(run)
+    prompt_hash = _orders_prompt_hash(snapshot)
     manifest = {
         "run_id": run_id,
         "started_at": started_at,
@@ -27,8 +28,8 @@ def write_run_manifest(run, snapshot, *, run_id, started_at, repo_root=None):
         "model_provider": provider,
         "model_name": model_name,
         "model_version": model_version,
-        "prompt_version": None,
-        "prompt_hash": _orders_prompt_hash(snapshot),
+        "prompt_version": prompt_hash,
+        "prompt_hash": prompt_hash,
         "semantic_model_version": snapshot.model_version,
         "semantic_model_hash": snapshot.model_hash,
         "authorization_version": snapshot.authorization_version,
@@ -51,13 +52,15 @@ def write_run_manifest(run, snapshot, *, run_id, started_at, repo_root=None):
 
 
 def _model_identity(run):
-    """真实模式只记录已配置的模型名。不读取密钥，也不编造版本号。"""
+    """真实模式只记录已配置的模型名。确定性运行和 Mock 不编造版本号。"""
     if run.get("mode") != "live":
         return None, None, None
+    supplied = run.get("supplied_model_version")
+    version = supplied.strip() if isinstance(supplied, str) and supplied.strip() else None
     name = os.environ.get("OPENAI_MODEL")
     if not isinstance(name, str) or not name.strip():
-        return None, None, None
-    return "openai", name.strip(), None
+        return None, None, version
+    return "openai", name.strip(), version
 
 
 def _configured_secrets():
@@ -105,7 +108,7 @@ def _case_record(case):
 
 
 def _orders_prompt_hash(snapshot) -> str:
-    """仓库没有已发布的提示版本。哈希当前订单提示，不另造版本号。"""
+    """提示版本就是当前订单提示的哈希，不另造一套版本号。"""
     tables = {}
     # 列来自映射，插入顺序随进程变化。哈希前按列名排序，不改查询范围原文。
     for dataset in snapshot.authorization.sql.datasets:

@@ -11,16 +11,20 @@ import json
 import os
 import re
 import tempfile
-from datetime import date
+import uuid
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
 from app.direct_sql import SqlCorrection, SqlRejected, SqlTimeout, execute_order_sql
 from app.evaluation.judgement import judge
+from app.evaluation.manifest import write_run_manifest
+from app.evaluation.report import summarize_run
 from app.evaluation.result_comparator import ComparisonPolicy, compare_results
 from app.query import load_catalog
 from app.query_scope import is_query_scope_question
+from app.semantic.snapshot import build_orders_snapshot
 from app.sql_prompt import authorized_joins, orders_query_scope
 
 PLATFORM_DATASET = Path(__file__).with_name("orders_platform.json")
@@ -39,6 +43,9 @@ def run_orders_platform(
     dataset_version=None,
     dataset_path=None,
     database_path=None,
+    repo_root=None,
+    model_version=None,
+    semantic_model_version=None,
 ):
     """运行 orders_platform.json。mode 只能是 deterministic、model 或 live 之一。"""
     if mode not in {"deterministic", "model", "live"}:
@@ -49,25 +56,67 @@ def run_orders_platform(
         cases = [case for case in cases if case["split"] == split]
     if dataset_version is not None and dataset["dataset_version"] != dataset_version:
         reports = [_error_case(case, "数据集版本不一致") for case in cases]
-        return _report(mode, dataset, reports, proves_model_sql=False, mock=False)
+        return _publish(
+            _report(mode, dataset, reports, proves_model_sql=False, mock=False),
+            repo_root=repo_root,
+            model_version=model_version,
+        )
+    pin_error = _version_pin_error(model_version, semantic_model_version)
+    if pin_error:
+        reports = [_error_case(case, pin_error) for case in cases]
+        return _publish(
+            _report(mode, dataset, reports, proves_model_sql=False, mock=False),
+            repo_root=repo_root,
+            model_version=model_version,
+        )
 
     database = _resolve_database_path(database_path)
     if mode == "deterministic":
         if not _snapshot_matches(dataset, database):
             reports = [_error_case(case, "数据快照与数据集不一致") for case in cases]
-            return _report(mode, dataset, reports, proves_model_sql=False, mock=False)
+            return _publish(
+                _report(mode, dataset, reports, proves_model_sql=False, mock=False),
+                repo_root=repo_root,
+                model_version=model_version,
+            )
         reports = _run_deterministic(cases, database)
-        return _report(mode, dataset, reports, proves_model_sql=False, mock=False)
+        return _publish(
+            _report(mode, dataset, reports, proves_model_sql=False, mock=False),
+            repo_root=repo_root,
+            model_version=model_version,
+        )
 
     if mode == "model":
         if runner is None:
             raise ValueError("model 模式需要传入可替换的 Runner")
         reports = [_score_case(case, runner(case)) for case in cases]
-        return _report(mode, dataset, reports, proves_model_sql=False, mock=bool(getattr(runner, "mock", False)))
+        return _publish(
+            _report(mode, dataset, reports, proves_model_sql=False, mock=bool(getattr(runner, "mock", False))),
+            repo_root=repo_root,
+            model_version=model_version,
+        )
 
     reports = _run_live(cases, database)
     proves_model_sql = any(case["proves_model_sql"] for case in reports)
-    return _report(mode, dataset, reports, proves_model_sql=proves_model_sql, mock=False)
+    return _publish(
+        _report(mode, dataset, reports, proves_model_sql=proves_model_sql, mock=False),
+        repo_root=repo_root,
+        model_version=model_version,
+    )
+
+
+def _configured_live_model_name():
+    """真实模式使用的模型名。未设置环境变量时与聊天入口的默认名一致。"""
+    return os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
+
+
+def _version_pin_error(model_version, semantic_model_version):
+    """调用方钉住的版本对不上时，整次运行不能记成通过。省略则不检查。"""
+    if model_version is not None and model_version != _configured_live_model_name():
+        return "模型版本不一致"
+    if semantic_model_version is not None and semantic_model_version != build_orders_snapshot(ROOT).model_version:
+        return "语义模型版本不一致"
+    return None
 
 
 def _run_deterministic(cases, database_path: Path):
@@ -80,25 +129,25 @@ def _deterministic_observation(case, database_path, catalog, joins):
     if case["expected_behavior"] == "answer" and is_query_scope_question(case["user_question"]):
         text = orders_query_scope(ROOT)
         return {"text": text, "result": {"columns": ["scope"], "rows": [[text]], "sql": ""}, "done": "completed"}
+    # 确定性适配器只执行已经验证过的参考 SQL。没有参考 SQL 时跳过，不写成通过。
+    if not str(case.get("expected_sql") or "").strip():
+        return {"skipped": True}
     try:
         result = execute_order_sql(database_path, case["expected_sql"], catalog, TODAY, joins)
     except (SqlRejected, SqlCorrection) as exc:
-        return _validator_observation(case, exc)
+        return _validator_observation(exc)
     except SqlTimeout:
         return {"timeout": True}
     return {"result": result, "done": "completed"}
 
 
-def _validator_observation(case, exc):
-    """校验器拒绝或要求修正，是拒绝和澄清用例的正确确定性观察。"""
+def _validator_observation(exc):
+    """观察只带校验器原文。校正映射为需要澄清，拒绝保持拒绝，不另写句子。"""
     message = str(exc).strip()
-    behavior = case["expected_behavior"]
-    if behavior == "clarify":
-        if not any(marker in message for marker in ("请先提供", "需要澄清", "请补充")):
-            message = f"需要澄清。{message}" if message else "需要澄清"
+    if isinstance(exc, SqlCorrection):
+        return {"text": message, "sql_correction": True, "done": "completed"}
+    if isinstance(exc, SqlRejected):
         return {"text": message, "done": "completed"}
-    if behavior == "refuse":
-        return {"text": message or "查询被拒绝", "done": "completed"}
     return {"error": {"code": "validator_error", "message": message}, "done": "failed"}
 
 
@@ -349,3 +398,21 @@ def _report(mode, dataset, cases, *, proves_model_sql, mock):
         "cases": cases,
         "summary": _summary(cases),
     }
+
+
+def _publish(run, *, repo_root, model_version=None):
+    """评分之后写出运行清单，并把分维度报告放在同一次返回里。"""
+    source = dict(run)
+    if run.get("mode") == "live" and model_version is not None:
+        source["supplied_model_version"] = model_version
+    manifest = write_run_manifest(
+        source,
+        build_orders_snapshot(ROOT),
+        run_id=uuid.uuid4().hex,
+        started_at=datetime.now(timezone.utc).astimezone().isoformat(),
+        repo_root=repo_root,
+    )
+    published = dict(run)
+    published["manifest"] = manifest
+    published["report"] = summarize_run(manifest)
+    return published

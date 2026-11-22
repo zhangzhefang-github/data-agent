@@ -1,5 +1,9 @@
 """把一次订单问数的观察判成执行状态和评测结果。"""
 
+from decimal import Decimal
+
+from app.evaluation.result_comparator import ComparisonPolicy, compare_results
+
 EXECUTION_STATUSES = (
     'success',
     'refused',
@@ -70,6 +74,9 @@ def _execution_status(observation, expected):
         return 'validator_error'
     if code == 'model_error':
         return 'model_error'
+    # 校验器要求修正时，执行状态是需要澄清。原文没有澄清标记也不另写一句。
+    if observation.get('sql_correction'):
+        return 'clarification_required'
     result = observation.get('result')
     if isinstance(result, dict) and (result.get('rows') or not observation.get('error')):
         return 'success'
@@ -133,30 +140,30 @@ def _score_success(observation, expected):
             return _verdict('success', 'FAIL', failure_stage='prior_period')
         return _verdict('success', 'PASS')
     if expect == 'aggregates':
-        projected = _project_rows(result, expected['columns'])
-        if projected is None or len(projected) != expected['row_count']:
+        # 分组结果核对完整行。行数和合计相同但客户与金额配错，仍然不匹配。
+        rows = expected.get('rows')
+        if not rows:
             return _verdict('success', 'FAIL', failure_stage='result')
-        index = {name: position for position, name in enumerate(expected['columns'])}
-        for name, expected_sum in expected['sums'].items():
-            try:
-                total = sum(row[index[name]] for row in projected)
-            except TypeError:
-                return _verdict('success', 'FAIL', failure_stage='result')
-            if not _same_value(total, expected_sum):
-                return _verdict('success', 'FAIL', failure_stage='result')
+        matched = compare_results(
+            result.get('columns') or [],
+            result.get('rows') or [],
+            expected['columns'],
+            rows,
+            ComparisonPolicy(
+                ordered=False,
+                absolute_tolerance=Decimal('0'),
+                relative_tolerance=Decimal('0'),
+                decimal_places=1,
+                dimension_keys=('customer_id',),
+            ),
+        ).matched
+        if not matched:
+            return _verdict('success', 'FAIL', failure_stage='result')
         return _verdict('success', 'PASS')
     projected = _project_rows(result, expected['columns'])
     if projected is None or not _rows_equal(projected, expected.get('rows')):
         return _verdict('success', 'FAIL', failure_stage='result')
     return _verdict('success', 'PASS')
-
-
-def _same_value(actual, expected):
-    if isinstance(actual, bool) or isinstance(expected, bool):
-        return actual == expected
-    if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
-        return float(actual) == float(expected)
-    return actual == expected
 
 
 def _canonical_row(row):

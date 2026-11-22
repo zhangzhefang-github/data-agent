@@ -63,7 +63,7 @@ def test_manifest_writes_one_utf8_file_with_run_lineage(tmp_path):
     assert written["model_provider"] is None
     assert written["model_name"] is None
     assert written["model_version"] is None
-    assert written["prompt_version"] is None
+    assert written["prompt_version"] == ORDERS_PROMPT_HASH
     assert written["prompt_hash"] == ORDERS_PROMPT_HASH
     assert written["semantic_model_version"] == "1.0"
     assert written["semantic_model_hash"] == SEMANTIC_MODEL_HASH

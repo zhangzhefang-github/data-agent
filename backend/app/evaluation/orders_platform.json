@@ -63,7 +63,8 @@
             1672.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该日期窗口内已发布的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -127,7 +128,8 @@
             1103.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该窗口内已完成订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -191,7 +193,8 @@
             284.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该窗口内已下单订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -255,7 +258,8 @@
             198.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该窗口内已发货订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -319,7 +323,8 @@
             49.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该窗口内已退货订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -383,7 +388,8 @@
             38.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该窗口内退货中订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -450,7 +456,8 @@
             482.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收仍处于已下单或已发货的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -508,7 +515,8 @@
             496.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 1 月的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -566,7 +574,8 @@
             415.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 2 月的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -624,7 +633,8 @@
             622.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 3 月的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -682,7 +692,8 @@
             139.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 4 月 1 日至 9 日的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -740,7 +751,8 @@
             1533.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年第一季度的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -806,7 +818,8 @@
             99.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收客户标识 51 在该窗口内的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -870,7 +883,8 @@
             205.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收订单上四种支付金额各自的合计，且不与订单金额相加。"
     },
     {
       "domain": "sales",
@@ -928,7 +942,8 @@
             79.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 1 月第一周的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -1011,7 +1026,8 @@
             38.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收按订单状态拆开后的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -1379,7 +1395,8 @@
             44.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收按客户标识汇总的订单笔数和订单金额，客户与金额必须逐行对应。"
     },
     {
       "domain": "sales",
@@ -1748,7 +1765,8 @@
             44.0
           ]
         ]
-      }
+      },
+      "business_basis": "用同义问法验收按客户标识汇总的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -1809,7 +1827,8 @@
             99.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收该窗口内订单金额最高的客户标识。"
     },
     {
       "domain": "sales",
@@ -1871,7 +1890,8 @@
             99.0
           ]
         ]
-      }
+      },
+      "business_basis": "用同义问法验收订单金额最大的客户标识。"
     },
     {
       "domain": "sales",
@@ -1931,7 +1951,8 @@
             1.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收订单金额最低的客户标识，金额相同时取较小的客户标识。"
     },
     {
       "domain": "sales",
@@ -1993,7 +2014,8 @@
             88.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收订单金额最高的日期，金额相同时取较早的日期。"
     },
     {
       "domain": "sales",
@@ -2067,7 +2089,8 @@
             23.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 1 月按订单状态拆开的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2131,7 +2154,8 @@
             139.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 4 月 1 日至 9 日按订单状态拆开的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2205,7 +2229,8 @@
             279.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 3 月按订单状态拆开的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2282,7 +2307,8 @@
             0.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收按订单状态拆开的信用卡金额。"
     },
     {
       "domain": "sales",
@@ -2359,7 +2385,8 @@
             15.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收按订单状态拆开的银行转账金额。"
     },
     {
       "domain": "sales",
@@ -2457,7 +2484,8 @@
             13.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收按客户标识统计已退货和退货中订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2537,7 +2565,8 @@
             15.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收客户标识 54 按订单状态拆开的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2606,7 +2635,8 @@
             15.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 2 月按订单状态拆开的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2668,7 +2698,8 @@
             1672.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收有客户记录的订单在等值内连接后，笔数和订单金额不被放大。"
     },
     {
       "domain": "sales",
@@ -2731,7 +2762,8 @@
             1672.0
           ]
         ]
-      }
+      },
+      "business_basis": "用同义问法验收能对上客户记录的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -2799,7 +2831,8 @@
             1672.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收先按订单汇总支付明细再连接时，订单金额不被支付行放大。"
     },
     {
       "domain": "sales",
@@ -2882,7 +2915,8 @@
             205.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收支付明细先按订单和支付方式汇总后，各支付方式的支付笔数和支付金额。"
     },
     {
       "domain": "sales",
@@ -2952,7 +2986,8 @@
             27
           ]
         ]
-      }
+      },
+      "business_basis": "验收支付笔数多于一笔的订单，其订单金额要在按订单汇总之后计算。"
     },
     {
       "domain": "sales",
@@ -3019,7 +3054,8 @@
             1319.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收只有一笔支付的订单笔数和订单金额，支付明细要先按订单汇总。"
     },
     {
       "domain": "sales",
@@ -3063,7 +3099,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收未先汇总就连接支付明细会放大订单金额，这种情况必须拒绝。"
     },
     {
       "domain": "sales",
@@ -3134,7 +3171,8 @@
             87.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收已退货或退货中、并且有客户记录的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -3217,7 +3255,8 @@
             52.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收 2018 年 1 月各支付方式的支付笔数和支付金额，支付明细要先汇总。"
     },
     {
       "domain": "sales",
@@ -3290,7 +3329,8 @@
             58.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收恰好有三笔支付的订单数量，订单金额不能乘上支付笔数。"
     },
     {
       "domain": "sales",
@@ -3305,7 +3345,7 @@
         "prior_year"
       ],
       "difficulty": "高",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-04-09 的订单笔数和订单金额是多少」。本轮：去年同期",
+      "user_question": "去年同期",
       "expected_metrics": [
         "orders.order_count",
         "orders.order_amount"
@@ -3344,7 +3384,9 @@
           "order_amount"
         ],
         "rows": []
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 的订单笔数和订单金额是多少",
+      "business_basis": "验收同一会话把上一轮日期平移到去年同期后的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -3358,7 +3400,7 @@
         "followup"
       ],
       "difficulty": "中",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-01-31 的订单笔数和订单金额是多少」。本轮：只看已完成的",
+      "user_question": "只看已完成的",
       "expected_metrics": [
         "orders.order_count",
         "orders.order_amount"
@@ -3408,7 +3450,9 @@
             424.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-01-31 的订单笔数和订单金额是多少",
+      "business_basis": "验收在上一轮 1 月合计之后，只保留已完成订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -3423,7 +3467,7 @@
         "order_payment_columns"
       ],
       "difficulty": "中",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-04-09 按订单状态统计订单笔数和订单金额」。本轮：已发货状态的信用卡金额是多少",
+      "user_question": "已发货状态的信用卡金额是多少",
       "expected_metrics": [
         "orders.credit_card_amount"
       ],
@@ -3470,7 +3514,9 @@
             129.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 按订单状态统计订单笔数和订单金额",
+      "business_basis": "验收在上一轮按状态汇总之后，追问已发货状态的信用卡金额。"
     },
     {
       "domain": "sales",
@@ -3485,7 +3531,7 @@
         "order_payment_columns"
       ],
       "difficulty": "中",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么」，结果是客户标识 51。本轮：这名客户的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+      "user_question": "这名客户的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
       "expected_metrics": [
         "orders.credit_card_amount",
         "orders.coupon_amount",
@@ -3541,7 +3587,9 @@
             0.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+      "business_basis": "验收在确认金额最高的客户之后，追问该客户的四种支付金额。"
     },
     {
       "domain": "sales",
@@ -3556,7 +3604,7 @@
         "ranking"
       ],
       "difficulty": "中",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么」。本轮：按订单金额从高到低列出前两名客户标识，金额相同则客户标识较小者在前",
+      "user_question": "按订单金额从高到低列出前两名客户标识，金额相同则客户标识较小者在前",
       "expected_metrics": [
         "orders.order_amount"
       ],
@@ -3606,7 +3654,9 @@
             65.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+      "business_basis": "验收在上一轮最高客户之后，按订单金额列出前两名客户标识。"
     },
     {
       "domain": "sales",
@@ -3620,7 +3670,7 @@
         "followup"
       ],
       "difficulty": "中",
-      "user_question": "上一轮问的是「2018-03-01 至 2018-03-31 的订单笔数和订单金额是多少」。本轮：其中已完成的呢",
+      "user_question": "其中已完成的呢",
       "expected_metrics": [
         "orders.order_count",
         "orders.order_amount"
@@ -3670,7 +3720,9 @@
             279.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-03-01 至 2018-03-31 的订单笔数和订单金额是多少",
+      "business_basis": "验收在上一轮 3 月合计之后，追问其中已完成订单的笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -3685,7 +3737,7 @@
         "order_payment_columns"
       ],
       "difficulty": "中",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-04-09 的信用卡、优惠券、银行转账和礼品卡金额分别是多少」。本轮：银行转账金额在 2018-02-01 至 2018-02-28 是多少",
+      "user_question": "银行转账金额在 2018-02-01 至 2018-02-28 是多少",
       "expected_metrics": [
         "orders.bank_transfer_amount"
       ],
@@ -3726,7 +3778,9 @@
             74.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+      "business_basis": "验收在上一轮四种支付金额之后，追问 2 月的银行转账金额。"
     },
     {
       "domain": "sales",
@@ -3741,7 +3795,7 @@
         "customer_breakdown"
       ],
       "difficulty": "高",
-      "user_question": "上一轮问的是「2018-01-01 至 2018-04-09 已完成订单的笔数和订单金额是多少」。本轮：按客户标识拆开，看每个客户的已完成订单笔数和订单金额",
+      "user_question": "按客户标识拆开，看每个客户的已完成订单笔数和订单金额",
       "expected_metrics": [
         "orders.order_count",
         "orders.order_amount"
@@ -4031,7 +4085,9 @@
             44.0
           ]
         ]
-      }
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 已完成订单的笔数和订单金额是多少",
+      "business_basis": "验收在上一轮已完成合计之后，按客户标识拆开已完成订单。"
     },
     {
       "domain": "sales",
@@ -4065,7 +4121,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收平均订单金额尚未发布，不能当作已授权指标返回。"
     },
     {
       "domain": "sales",
@@ -4106,7 +4163,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收客户姓名未授权，应说明不能提供姓名并改用客户标识。"
     },
     {
       "domain": "sales",
@@ -4140,7 +4198,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收 raw 和 staging 不在订单主题授权内，必须拒绝。"
     },
     {
       "domain": "sales",
@@ -4183,7 +4242,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收按月汇总尚未授权，不能返回月度订单金额。"
     },
     {
       "domain": "sales",
@@ -4217,7 +4277,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收 NPS 不在订单空间授权内，必须拒绝。"
     },
     {
       "domain": "sales",
@@ -4261,7 +4322,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收订单金额和支付金额不能相加，需要先澄清要看哪一个。"
     },
     {
       "domain": "sales",
@@ -4305,7 +4367,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收没有已发布的客户数，应改按客户标识使用订单笔数。"
     },
     {
       "domain": "sales",
@@ -4352,7 +4415,8 @@
       },
       "split": "dev",
       "expected_behavior": "answer",
-      "expected_sql": ""
+      "expected_sql": "",
+      "business_basis": "验收用户询问可查范围时，回复当前订单空间的授权说明。"
     },
     {
       "domain": "sales",
@@ -4405,7 +4469,8 @@
           "order_amount"
         ],
         "rows": []
-      }
+      },
+      "business_basis": "验收用户不写日期时按今年截至今天过滤后的订单笔数和订单金额。"
     },
     {
       "domain": "sales",
@@ -4439,7 +4504,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收未说明按金额还是笔数的最高客户时，必须先澄清口径。"
     },
     {
       "domain": "sales",
@@ -4473,7 +4539,8 @@
       "expected_result": {
         "columns": [],
         "rows": []
-      }
+      },
+      "business_basis": "验收「成功」不在订单状态字典内，必须先澄清具体状态。"
     },
     {
       "domain": "sales",
@@ -4528,7 +4595,8 @@
             871.0
           ]
         ]
-      }
+      },
+      "business_basis": "验收信用卡金额使用订单上已发布的支付金额，而不是支付明细金额。"
     }
   ]
 }

@@ -11,6 +11,7 @@ _VERSION_FIELDS = (
     "dataset_version",
     "model_name",
     "model_version",
+    "prompt_version",
     "semantic_model_version",
     "semantic_model_hash",
 )
@@ -118,6 +119,7 @@ _VERSION_LABELS = (
     ("dataset_version", "数据集版本"),
     ("model_name", "模型名"),
     ("model_version", "模型版本"),
+    ("prompt_version", "提示版本"),
     ("semantic_model_version", "语义模型版本"),
     ("semantic_model_hash", "语义模型哈希"),
 )

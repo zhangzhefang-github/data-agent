@@ -93,12 +93,29 @@ def test_orders_dataset_scores_rows_aggregates_rejection_and_followup():
     assert customers['status'] == 'failed'
     assert customers['failure_stage'] == 'result'
 
-    passed_customers = score_orders_case(cases['by_customer'], {'result': {
+    by_customer = cases['by_customer']
+    assert by_customer['columns'] == ['customer_id', 'order_rows', 'order_amount']
+    assert by_customer['row_count'] == 62
+    assert by_customer['sums'] == {'order_rows': 99, 'order_amount': 1672.0}
+    assert len(by_customer['rows']) == 62
+    assert sum(row[1] for row in by_customer['rows']) == 99
+    assert sum(row[2] for row in by_customer['rows']) == 1672.0
+
+    # 行数和合计相同，但客户与金额不是快照里的对应关系。
+    mismatched_customers = score_orders_case(by_customer, {'result': {
         'columns': ['order_amount', 'customer_id', 'order_rows'],
         'rows': [[1.0, index, 1] for index in range(61)] + [[1611.0, 61, 38]],
         'sql': 'SELECT customer_id',
     }})
-    assert passed_customers['status'] == 'passed'
+    assert mismatched_customers['status'] == 'failed'
+    assert mismatched_customers['failure_stage'] == 'result'
+
+    matched_customers = score_orders_case(by_customer, {'result': {
+        'columns': ['order_amount', 'customer_id', 'order_rows'],
+        'rows': [[row[2], row[0], row[1]] for row in by_customer['rows']],
+        'sql': 'SELECT customer_id',
+    }})
+    assert matched_customers['status'] == 'passed'
 
     bare_error = score_orders_case(cases['reject_average'], {'error': True, 'done': 'failed'})
     assert bare_error['evaluation_status'] == 'ERROR'
