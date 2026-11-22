@@ -1,4 +1,4 @@
-from app.evaluation.runner import run_deterministic
+from app.evaluation.runner import load_orders_dataset, run_deterministic, score_orders_case
 
 
 def test_golden_dataset_uses_fixed_data_and_passes_all_cases():
@@ -55,3 +55,115 @@ def test_live_evaluation_uses_fixture_with_external_ads_configured(monkeypatch):
     report = runner.run_live(case['id'])
     assert report['cases'][0]['status'] == 'failed'
     assert main.DATABASE_URL == 'postgresql://example.invalid/enterprise'
+
+
+def test_orders_dataset_scores_rows_aggregates_rejection_and_followup():
+    cases = {case['id']: case for case in load_orders_dataset()['cases']}
+    assert set(cases) >= {
+        'window_totals', 'by_status', 'payment_amounts', 'by_customer', 'customer_orders',
+        'top_customer', 'previous_period', 'query_scope', 'reject_month', 'reject_nps',
+        'reject_average', 'reject_staging', 'reject_payment_join',
+    }
+
+    totals = score_orders_case(cases['window_totals'], {'result': {
+        'columns': ['order_amount', 'order_rows'],
+        'rows': [[1672, 99]],
+        'sql': 'SELECT 1',
+    }})
+    assert totals['status'] == 'passed'
+
+    status = score_orders_case(cases['by_status'], {'result': {
+        'columns': ['order_amount', 'status', 'order_rows'],
+        'rows': [
+            [49.0, '已退货', 4],
+            [1103.0, '已完成', 67],
+            [38.0, '退货中', 2],
+            [198.0, '已发货', 13],
+            [284.0, '已下单', 13],
+        ],
+        'sql': 'SELECT status',
+    }})
+    assert status['status'] == 'passed'
+
+    customers = score_orders_case(cases['by_customer'], {'result': {
+        'columns': ['customer_id', 'order_rows', 'order_amount'],
+        'rows': [[1, 50, 800.0], [2, 49, 872.0]],
+        'sql': 'SELECT customer_id',
+    }})
+    assert customers['status'] == 'failed'
+    assert customers['failure_stage'] == 'result'
+
+    passed_customers = score_orders_case(cases['by_customer'], {'result': {
+        'columns': ['order_amount', 'customer_id', 'order_rows'],
+        'rows': [[1.0, index, 1] for index in range(61)] + [[1611.0, 61, 38]],
+        'sql': 'SELECT customer_id',
+    }})
+    assert passed_customers['status'] == 'passed'
+
+    assert score_orders_case(cases['reject_average'], {'error': True, 'done': 'failed'})['status'] == 'passed'
+    assert score_orders_case(cases['reject_payment_join'], {'result': {
+        'columns': ['order_amount'], 'rows': [[1672.0]], 'sql': 'SELECT SUM(amount)',
+    }})['failure_stage'] == 'rejection'
+
+    followup = score_orders_case(cases['previous_period'], {'result': {
+        'columns': ['order_rows', 'order_amount'],
+        'rows': [],
+        'sql': "WHERE order_date BETWEEN DATE '2017-01-01' AND DATE '2017-04-09'",
+    }})
+    assert followup['status'] == 'passed'
+    shifted = score_orders_case(cases['previous_period'], {'result': {
+        'columns': ['order_rows', 'order_amount'],
+        'rows': [],
+        'sql': "WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+    }})
+    assert shifted['failure_stage'] == 'prior_period'
+
+    scope = score_orders_case(cases['query_scope'], {'text': '可查询的数据范围'}, '可查询的数据范围')
+    assert scope['status'] == 'passed'
+    assert score_orders_case(cases['query_scope'], {'text': '改写后的范围'}, '可查询的数据范围')['failure_stage'] == 'result'
+
+
+def test_orders_evaluation_skips_without_duckdb_or_model_key(monkeypatch):
+    from app.evaluation import runner
+
+    monkeypatch.delenv('SALES_DUCKDB_PATH', raising=False)
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    skipped = runner.run_orders('window_totals')['cases'][0]
+    assert skipped['status'] == 'skipped'
+    assert skipped['reason'] == 'SALES_DUCKDB_PATH 未设置'
+
+    monkeypatch.setenv('SALES_DUCKDB_PATH', '/tmp/jaffle_shop.duckdb')
+    skipped_model = runner.run_orders('window_totals')['cases'][0]
+    assert skipped_model['status'] == 'skipped'
+    assert skipped_model['reason'] == 'OPENAI_API_KEY 未设置'
+
+
+def test_orders_evaluation_uses_the_order_duckdb_not_the_sales_fixture(monkeypatch):
+    from app import main
+    from app.evaluation import runner
+
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
+    monkeypatch.setenv('SALES_DUCKDB_PATH', '/data/jaffle_shop.duckdb')
+    monkeypatch.setattr(main, 'DATABASE_URL', 'postgresql://example.invalid/enterprise')
+
+    def fake_send(client, question, conversation_id=None):
+        assert main.CATALOG['id'] == 'orders'
+        assert main.DUCKDB_PATH == '/data/jaffle_shop.duckdb'
+        assert main.DATABASE_URL is None
+        return {'error': True, 'done': 'failed'}
+
+    monkeypatch.setattr(runner, 'send', fake_send)
+    report = runner.run_orders('window_totals')
+    assert report['mode'] == 'orders'
+    assert report['cases'][0]['status'] == 'failed'
+    assert report['cases'][0]['failure_stage'] == 'semantic_resolution'
+    assert main.DATABASE_URL == 'postgresql://example.invalid/enterprise'
+
+
+def test_orders_scope_question_returns_the_authorization_text(monkeypatch, tmp_path):
+    from app.evaluation import runner
+
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    monkeypatch.setenv('SALES_DUCKDB_PATH', str(tmp_path / 'unused.duckdb'))
+    report = runner.run_orders('query_scope')
+    assert report['cases'][0]['status'] == 'passed'

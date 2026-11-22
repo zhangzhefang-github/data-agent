@@ -50,7 +50,7 @@ npm --prefix frontend run build
 
 模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。追踪导出默认关闭。需要 OpenAI Tracing 时，单独设置 `OPENAI_TRACING_API_KEY` 为有效的 OpenAI 密钥。模型服务密钥独立保存在 `OPENAI_API_KEY`。启用追踪时，应用关闭 SDK 中的敏感内容采集。
 
-销售 Golden Dataset 使用固定的 2026-06-01 业务日期和独立 SQLite 测试数据，运行以下命令可验证 11 条标准查询。输出包含每条实际 Query IR、SQL、执行状态、结果及失败环节。订单主题空间的 DuckDB Direct SQL 回归入口和验收范围见[查询架构演进](docs/semantic-model/query-architecture-evolution.md#验证)。
+销售 Golden Dataset 仍覆盖原来的结构化查询，使用固定的 2026-06-01 业务日期和独立 SQLite 测试数据。它不是这轮订单验收。运行以下命令可验证 11 条标准查询。输出包含每条实际 Query IR、SQL、执行状态、结果及失败环节。
 
 ```sh
 PYTHONPATH=backend python -m app.evaluation.runner
@@ -63,3 +63,11 @@ PYTHONPATH=backend python -m app.evaluation.runner --live
 ```
 
 真实模型评测会调用服务并可能产生费用。未设置密钥时逐条标记为 skipped，失败会返回非零退出码。默认输出为 JSON，可重定向到工作区以外的文件以保存每次实测记录。
+
+订单主题空间的当前评测单独存放在 `backend/app/evaluation/orders_golden.json`。先加载 `.env`，并把 `SALES_DUCKDB_PATH` 指到 Jaffle Shop DuckDB，然后执行：
+
+```sh
+PYTHONPATH=backend python -m app.evaluation.runner --orders
+```
+
+这条命令调用真实模型。问数题只比对结果行，不要求 SQL 原文一致；拒绝题不能返回结果行；「去年同期」沿用同一会话，核对日期被平移且结果为空。「能查什么」不调用模型，回复当前空间授权原文。未设置密钥或 DuckDB 路径时，对应用例记为 skipped。执行器和校验器的回归仍是 `backend/tests/test_direct_sql_chat.py`。

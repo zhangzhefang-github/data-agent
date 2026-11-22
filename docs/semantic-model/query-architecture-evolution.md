@@ -19,6 +19,8 @@
 
 Agent 取得实际 DuckDB 版本、获准的表和字段，以及已执行验证的 SQL 示例。SQLGlot 校验单条 SELECT。程序校验指标表达式、授权维度的筛选和分组、排序，以及已授权的等值内连接。未授权表、支付明细关联和外部数据源会被拒绝。语义校验器会拒绝未预聚合的 Fanout。执行器不执行未授权连接。带 Fanout 的支付关系仍不向问数开放。
 
+2026-11-22，上一段是 `data-agent@f9bc191` 的执行边界。同日下一步改为 Genie 的两条限制：只读，且只能访问该空间列出的表。WITH、子查询、空间内多表 JOIN、GROUP BY 和窗口函数要能执行。订单笔数和订单金额在未先按订单汇总的支付连接上聚合，仍然拒绝。见 [Genie 的 SQL 形状](../wiki/genie-sql-shape.md)。
+
 2026-11-21，订单 DuckDB 路径上的提示、授权表和连接键来自同一次已发布语义上下文，不再读取 `orders_space.yaml`。客户标识可以在订单表上分组，也可以出现在已授权连接的客户表一侧。客户记录是否存在以这条等值内连接为准，客户标识非空不能代替。订单 Direct SQL 不再把按问题裁剪的目录工具交给模型。业务关系 `customer_to_order` 用 `dataset_relationship_ids` 指向对应的数据集 JOIN；空间未点名的 JOIN 不会因此进入问数。
 
 DuckDB 以只读方式连接，关闭外部访问，执行限时 5 秒，最多返回 500 行。可修复的 SQL 错误最多重试两次，每次重新校验。权限拒绝会结束查询。
@@ -31,9 +33,9 @@ DuckDB 以只读方式连接，关闭外部访问，执行限时 5 秒，最多�
 
 ```sh
 (cd backend && python -m pytest -q tests/test_direct_sql_chat.py)
-(cd backend && python -m app.evaluation.runner)
+PYTHONPATH=backend python -m app.evaluation.runner --orders
 ```
 
-订单 Direct SQL 回归通过现有聊天接口运行，用替换的模型 Runner 提交 SQL，由真实的 DuckDB 测试数据库执行。用例覆盖订单笔数、金额、空结果、权限拒绝、重试和 Direct SQL 会话续问。销售 Golden Dataset 继续验证结构化查询路径。
+订单 Direct SQL 的执行器回归通过现有聊天接口运行，用替换的模型 Runner 提交 SQL，由真实的 DuckDB 测试数据库执行。用例覆盖订单笔数、金额、空结果、权限拒绝、重试和 Direct SQL 会话续问。
 
-真实模型验收使用本地 Jaffle Shop。先查询 2018-01-01 至 2018-04-09 的订单笔数和金额，预期为 99 笔、金额 1672。随后在同一会话问「去年同期」，核对 SQL 使用 2017-01-01 至 2017-04-09，结果为空，且会话保存本次成功查询。
+当前订单验收是 `--orders`。它读取 `backend/app/evaluation/orders_golden.json`，对本地 Jaffle Shop 调用真实模型。2018-01-01 至 2018-04-09 的问数只比对结果行：订单笔数 99、金额 1672.0，五种状态、四种支付金额、按客户标识 62 行且合计仍是 99 笔和 1672.0，有客户记录的订单仍是 99 笔和 1672.0，金额最高的客户标识是 51、金额 99.0。按月、NPS、未发布的平均订单金额、raw 和 staging 不能返回结果行。支付明细连接这题在 2026-11-22 返回了未连接的订单金额 1672.0，评测仍判失败；结论见[支付明细与 Fanout](../wiki/payment-fanout.md)。随后在同一会话问「去年同期」，核对 SQL 使用 2017-01-01 至 2017-04-09，结果为空。销售 Golden Dataset 仍只验证原来的结构化路径，运行 `python -m app.evaluation.runner`，不作为这轮订单验收。
