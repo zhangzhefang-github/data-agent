@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PLATFORM_DATASET = Path(__file__).resolve().parents[1] / "app" / "evaluation" / "orders_platform.json"
 
 # 独立于清单实现、预先对当前订单提示文本做的 SHA-256。仓库没有已发布的提示版本。
-ORDERS_PROMPT_HASH = "22d93c568ad5e66537ada472a5f5ef79203995502cc6b5d86c697d728bfd9e79"
+ORDERS_PROMPT_HASH = "749f1c33cf022d41769ed85e0d87f784f1c5f6891aad8596f6feba7683a4c1bd"
 SEMANTIC_MODEL_HASH = "5eceaf7f7a33cd2a0b36996ce61cf9314b50a941cfcf324ae5308102f76f4792"
 AUTHORIZATION_HASH = "1451c8c4c3de4143fa15cd71b3d0347921a18faed996976d2ac3d555104bea75"
 
