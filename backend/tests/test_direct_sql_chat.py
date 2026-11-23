@@ -709,3 +709,30 @@ def test_prior_year_timeout_preserves_last_success(order_chat, monkeypatch):
         history = client.get('/api/conversations/' + cid).json()
         assert history['last_query'] == before
         assert history['messages'][-1]['outcome'] == response['outcome']
+
+
+def test_prior_year_without_prior_date_requires_a_range(order_chat):
+    from app.evaluation.runner import send
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [TOTALS])
+        cid = first['conversation']['conversation_id']
+        before = client.get('/api/conversations/' + cid).json()['last_query']
+        response = send(client, '去年同期', cid)
+        assert response['outcome']['status'] == 'clarification_required'
+        assert '日期范围' in response['outcome']['reason']
+        assert 'result' not in response
+        assert client.get('/api/conversations/' + cid).json()['last_query'] == before
+
+
+def test_prior_year_with_additional_grouping_uses_the_model_query(order_chat):
+    grouped = ("SELECT status, COUNT(*) AS order_rows FROM orders "
+               "WHERE order_date BETWEEN '2017-01-01' AND '2017-12-31' GROUP BY status")
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        cid = first['conversation']['conversation_id']
+        followup, replies = order_chat(client, [grouped], '去年同期按状态分组', cid)
+        assert followup['done']['outcome']['status'] == 'success'
+        assert replies
+        assert followup['result']['columns'] == ['status', 'order_rows']
+        assert '2017-01-01' in followup['result']['sql']
+        assert 'GROUP BY' in followup['result']['sql']

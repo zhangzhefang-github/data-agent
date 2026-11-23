@@ -145,6 +145,7 @@ async def chat(request: ChatRequest):
         terminal = None
         context = conversation["last_query"] if conversation else None
         is_previous_period = bool(re.search(r"去年同期", request.message))
+        is_pure_previous_period = bool(re.fullmatch(r"\s*(?:(?:那|那么|请问|查询|查看|看看|查一下)\s*)?去年同期(?:呢|是多少|怎么样|的情况)?[？?。！!]*\s*", request.message))
         source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
         direct_sql = CATALOG["id"] == "orders" and source.engine == "duckdb"
         business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
@@ -274,7 +275,7 @@ async def chat(request: ChatRequest):
                     return json.dumps(result_data[-1], ensure_ascii=False)
                 if query_error or attempts >= 3:
                     raise SqlRejected("查询已结束")
-                candidate = previous_sql if is_previous_period and previous_sql else sql
+                candidate = previous_sql if is_pure_previous_period and previous_sql else sql
                 # 补充只发生在大空间的检索遗漏。校验仍用完整授权，未授权表直接拒绝。
                 if snapshot is not None and presentation is not None and not is_previous_period:
                     gap = context_coverage_gap(candidate, snapshot.authorization, presentation)
@@ -332,7 +333,16 @@ async def chat(request: ChatRequest):
                         saved_sql, request_catalog, business_today,
                         shift=last_year if is_previous_period else None, joins=join_keys,
                     )
-                if is_previous_period and previous_sql:
+                if is_previous_period and previous_sql and not re.search(r"\d{4}-\d{2}-\d{2}", previous_sql):
+                    message = "上一轮查询没有日期范围，请先提供日期范围再询问去年同期。"
+                    outcome = {"status": "clarification_required", "reason": message}
+                    yield event("text", {"delta": message})
+                    message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
+                    saved = True
+                    yield event("message", {"id": message_id})
+                    yield event("done", {"status": "completed", "outcome": outcome})
+                    return
+                if is_pure_previous_period and previous_sql:
                     # 服务已根据最近成功查询确定同期 SQL；不能再由模型决定是否执行。
                     data = await asyncio.to_thread(
                         execute_order_sql, Path(source.location), previous_sql, request_catalog, business_today, join_keys,
@@ -369,7 +379,7 @@ async def chat(request: ChatRequest):
                     "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
                     "需要用户澄清时，不要执行查询，调用 execute_direct_sql，sql 为空字符串，clarification 填写澄清说明，options 填写可供用户选择的选项文本列表。"
                     "去年同期的日期已经由服务算好，写在本次提示开头。解释时原样复述，不要再减一年，也不要改成当前业务日期。结果为空时说明该区间没有可对比的订单，不要把空结果说成查询失败。"
-                    "针对去年同期，调用工具提交服务提供的同期 SQL，不要自行改写日期。"
+                    "针对去年同期的附加要求，以服务提供的同期 SQL 为起点，按用户要求调整筛选或分组，不要再次平移日期。"
                     "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
                     "用户询问可查询范围时，只回复提示中的可查询范围原文，不要调用工具。"
                 )
