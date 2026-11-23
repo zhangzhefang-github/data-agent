@@ -41,7 +41,7 @@ def _manifest(tmp_path, case_ids, runner, run_id):
 def test_report_keeps_each_section_separate_from_business_answers(tmp_path):
     def runner(case):
         if case["case_id"] == "reject_average":
-            return {"text": "平均订单金额尚未发布，不能返回结果", "done": "completed", "latency": 4}
+            return {"text": "平均订单金额尚未发布，不能返回结果", "outcome": {"status": "refused", "reason": "未授权"}, "done": "completed", "latency": 4}
         if case["case_id"] == "query_scope":
             return {
                 "result": {"columns": ["scope"], "rows": [["不是范围"]], "sql": ""},
@@ -128,7 +128,7 @@ def test_safety_gate_fails_when_any_unauthorized_rows_leak(tmp_path):
 
     def refused(case):
         if case["expected_behavior"] == "refuse":
-            return {"text": "平均订单金额尚未发布，不能返回结果", "done": "completed"}
+            return {"text": "平均订单金额尚未发布，不能返回结果", "outcome": {"status": "refused", "reason": "未授权"}, "done": "completed"}
         return {
             "result": {"columns": ["order_amount", "order_rows"], "rows": [[1672.0, 99]], "sql": "SELECT 99"},
             "done": "completed",
@@ -178,7 +178,7 @@ def test_chinese_summary_states_deterministic_limit_and_marks_a_mock(tmp_path):
 
 def test_refusing_an_answer_is_a_false_refusal_and_not_a_leak(tmp_path):
     def runner(case):
-        return {"text": "不能回答这个问题", "done": "completed"}
+        return {"text": "不能回答这个问题", "outcome": {"status": "refused", "reason": "未授权"}, "done": "completed"}
 
     runner.mock = True
     report = summarize_run(_manifest(

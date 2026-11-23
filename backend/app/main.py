@@ -1,4 +1,5 @@
 import asyncio
+import duckdb
 import fcntl
 import json
 import logging
@@ -139,6 +140,8 @@ async def chat(request: ChatRequest):
         result_data = []
         query_data = []
         answer = []
+        saved = False
+        terminal = None
         context = conversation["last_query"] if conversation else None
         is_previous_period = bool(re.search(r"去年同期", request.message))
         source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
@@ -168,18 +171,20 @@ async def chat(request: ChatRequest):
             message = render_query_scope(snapshot.authorization)
             yield event("conversation", {"conversation_id": conversation_id})
             yield event("text", {"delta": message})
-            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
+            outcome = {"status": "success", "reason": message}
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
             yield event("message", {"id": message_id})
-            yield event("done", {"status": "completed"})
+            yield event("done", {"status": "completed", "outcome": outcome})
             return
 
         if is_previous_period and not context:
             message = f"请先提供需要对比的{CATALOG['name']}查询，再询问去年同期。"
             yield event("conversation", {"conversation_id": conversation_id})
             yield event("text", {"delta": message})
-            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
+            outcome = {"status": "clarification_required", "reason": message}
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
             yield event("message", {"id": message_id})
-            yield event("done", {"status": "completed"})
+            yield event("done", {"status": "completed", "outcome": outcome})
             return
 
         @function_tool
@@ -226,10 +231,16 @@ async def chat(request: ChatRequest):
         presentation = None
 
         @function_tool(failure_error_function=None)
-        async def execute_direct_sql(sql: str) -> str:
+        async def execute_direct_sql(sql: str, clarification: str = "") -> str:
             """Execute one DuckDB SELECT submitted as SQL, with no surrounding Markdown."""
-            nonlocal attempts, coverage_attempts, query_error, presentation
+            nonlocal attempts, coverage_attempts, query_error, presentation, terminal
             async with query_lock:
+                if clarification:
+                    if not result_data:
+                        terminal = {"status": "clarification_required", "reason": clarification}
+                    return json.dumps(terminal or {"status": "success"}, ensure_ascii=False)
+                if terminal:
+                    return json.dumps(terminal, ensure_ascii=False)
                 if result_data:
                     return json.dumps(result_data[-1], ensure_ascii=False)
                 if query_error or attempts >= 3:
@@ -241,6 +252,7 @@ async def chat(request: ChatRequest):
                     if gap:
                         if coverage_attempts >= MAX_CONTEXT_COVERAGE:
                             query_error = "已授权上下文补充次数已用尽"
+                            terminal = {"status": "validator_error", "reason": query_error}
                             raise SqlRejected(query_error)
                         coverage_attempts += 1
                         presentation = include_datasets(
@@ -262,10 +274,12 @@ async def chat(request: ChatRequest):
                     if attempts < 3 and not is_previous_period:
                         return json.dumps({"error": str(exc), "remaining_repairs": 3 - attempts}, ensure_ascii=False)
                     query_error = "SQL 修复后仍无法执行"
+                    terminal = {"status": "validator_error", "reason": query_error}
                     raise
                 except SqlRejected as exc:
                     logger.error("Direct SQL rejected (%s): %s", exc, candidate)
                     query_error = str(exc)
+                    terminal = {"status": "refused", "reason": query_error}
                     raise
                 result_data.append(data)
                 query_data.append({"mode": "orders_duckdb", "sql": data["sql"]})
@@ -302,6 +316,7 @@ async def chat(request: ChatRequest):
                     "用户说出时间时写入对应日期条件。用户没有说出时间时不要添加日期条件。"
                     "未写 LIMIT 时使用默认行数上限。"
                     "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
+                    "需要用户澄清时，不要执行查询，调用 execute_direct_sql，sql 为空字符串，clarification 填写澄清说明。"
                     "去年同期的日期已经由服务算好，写在本次提示开头。解释时原样复述，不要再减一年，也不要改成当前业务日期。结果为空时说明该区间没有可对比的订单，不要把空结果说成查询失败。"
                     "针对去年同期，调用工具提交服务提供的同期 SQL，不要自行改写日期。"
                     "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
@@ -346,25 +361,46 @@ async def chat(request: ChatRequest):
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
                     answer.append(item.data.delta)
                     yield event("text", {"delta": item.data.delta})
-            if direct_sql and not result_data and attempts:
-                raise SqlCorrection("查询未返回已验证的结果")
+            if terminal:
+                raise SqlRejected(terminal["reason"])
+            if direct_sql and not result_data:
+                if attempts:
+                    raise SqlCorrection("查询未返回已验证的结果")
+                terminal = {"status": "invalid_output", "reason": "未返回查询结果或澄清说明"}
+                raise ValueError(terminal["reason"])
             if result_data:
                 yield event("result", result_data[-1])
+            outcome = {"status": "success", "reason": "查询完成"}
             message_id = conversations.add_message(
                 CONVERSATIONS, conversation_id, "assistant", "".join(answer),
-                result_data[-1] if result_data else None, query_data[-1] if query_data else None,
+                result_data[-1] if result_data else None, query_data[-1] if query_data else None, outcome=outcome,
             )
+            saved = True
             yield event("message", {"id": message_id})
-            yield event("done", {"status": "completed"})
+            yield event("done", {"status": "completed", "outcome": outcome})
         except asyncio.CancelledError:
+            if not saved:
+                outcome = {"status": "model_error", "reason": "响应流中断"}
+                conversations.add_message(CONVERSATIONS, conversation_id, "assistant", "".join(answer), outcome=outcome)
             raise
-        except SqlTimeout as exc:
-            yield event("error", {"message": str(exc), "code": "query_timeout"})
-            yield event("done", {"status": "failed"})
         except Exception as exc:
             logger.error("Agent request failed (%s)", type(exc).__name__)
-            yield event("error", {"message": query_error or "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
-            yield event("done", {"status": "failed"})
+            if terminal:
+                outcome = terminal
+            elif isinstance(exc, SqlTimeout):
+                outcome = {"status": "timeout", "reason": str(exc)}
+            elif isinstance(exc, SqlCorrection):
+                outcome = {"status": "validator_error", "reason": str(exc)}
+            elif isinstance(exc, duckdb.Error):
+                outcome = {"status": "database_error", "reason": "数据库查询失败"}
+            else:
+                outcome = {"status": "model_error", "reason": "查询失败，请检查模型连接和服务配置"}
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", "".join(answer), outcome=outcome)
+            yield event("message", {"id": message_id})
+            if outcome["status"] != "clarification_required":
+                code = "query_timeout" if outcome["status"] == "timeout" else "query_failed"
+                yield event("error", {"message": outcome["reason"], "code": code})
+            yield event("done", {"status": "completed" if outcome["status"] == "clarification_required" else "failed", "outcome": outcome})
 
     async def guarded_stream():
         try:

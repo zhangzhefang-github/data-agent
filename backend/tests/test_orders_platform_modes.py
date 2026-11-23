@@ -244,7 +244,7 @@ def test_deterministic_refusal_passes_only_when_the_reference_sql_is_rejected(tm
     assert report["proves_model_sql"] is False
 
 
-def test_deterministic_clarification_passes_when_the_validator_stops_the_sql(tmp_path):
+def test_deterministic_validator_correction_is_not_a_clarification(tmp_path):
     database = _duckdb_path()
     if database is None:
         pytest.skip("SALES_DUCKDB_PATH 指向的 DuckDB 不存在，跳过参考 SQL 重执行")
@@ -260,12 +260,13 @@ def test_deterministic_clarification_passes_when_the_validator_stops_the_sql(tmp
     report = run_orders_platform("deterministic", dataset_path=dataset_path, database_path=database)
 
     by_id = {case["id"]: case for case in report["cases"]}
-    assert by_id["clarify_customer_name"]["evaluation_status"] == "PASS"
-    assert by_id["clarify_customer_name"]["execution_status"] == "clarification_required"
+    assert by_id["clarify_customer_name"]["evaluation_status"] == "ERROR"
+    assert by_id["clarify_customer_name"]["execution_status"] == "validator_error"
     assert by_id["clarify_success_status"]["evaluation_status"] == "SKIPPED"
     assert by_id["clarify_customer_name_returns_rows"]["evaluation_status"] == "FAIL"
     assert by_id["clarify_customer_name_returns_rows"]["actual_rows"] == [[99, 1672.0]]
-    assert report["summary"]["PASS"] == 1
+    assert report["summary"]["PASS"] == 0
+    assert report["summary"]["ERROR"] == 1
     assert report["summary"]["SKIPPED"] == 1
     assert report["summary"]["FAIL"] == 1
     assert report["proves_model_sql"] is False
@@ -325,8 +326,8 @@ def test_deterministic_platform_dataset_runs_without_the_sales_golden(monkeypatc
     failed = [
         case["id"] for case in report["cases"] if case["evaluation_status"] not in {"PASS", "SKIPPED"}
     ]
-    assert failed == []
-    assert report["summary"] == {"PASS": 57, "FAIL": 0, "ERROR": 0, "SKIPPED": 3}
+    assert failed == ["clarify_customer_name", "clarify_customer_count"]
+    assert report["summary"] == {"PASS": 55, "FAIL": 0, "ERROR": 2, "SKIPPED": 3}
 
 
 def test_model_mode_scores_an_injected_runner_and_marks_the_mock(monkeypatch, tmp_path):

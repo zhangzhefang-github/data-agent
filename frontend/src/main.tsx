@@ -5,7 +5,8 @@ import { AnswerBody, Feedback, ResultView, type Rating, type Result } from './Re
 import 'antd/dist/reset.css'
 import './style.css'
 
-type Message = { id: string, role: string, content: string, result: Result | null, feedback?: Rating | null }
+type Outcome = { status: string, reason: string }
+type Message = { id: string, role: string, content: string, result: Result | null, feedback?: Rating | null, outcome?: Outcome | null }
 type ConversationSummary = { id: string, title: string }
 function App() {
   const [conversationId, setConversationId] = useState<string>()
@@ -33,15 +34,16 @@ function App() {
       const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`)
       if (!response.ok) throw new Error()
       const conversation = await response.json()
-      setConversationId(id); setMessages(conversation.messages); setAnswer(''); setResult(undefined); setStatus('')
+      setConversationId(id); setMessages(conversation.messages); setAnswer(''); setResult(undefined); setOutcome(undefined); setStatus('')
     } catch { setStatus('无法加载会话') }
   }
   function newConversation() {
-    setConversationId(undefined); setMessages([]); setAnswer(''); setResult(undefined); setStatus(''); setQuestion('')
+    setConversationId(undefined); setMessages([]); setAnswer(''); setResult(undefined); setOutcome(undefined); setStatus(''); setQuestion('')
   }
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [result, setResult] = useState<Result>()
+  const [outcome, setOutcome] = useState<Outcome>()
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -51,7 +53,7 @@ function App() {
   }, [messages, answer, result, status, conversationId])
   async function submit() {
     if (!question.trim() || busy) return
-    setBusy(true); setAnswer(''); setResult(undefined); setStatus('查询中')
+    setBusy(true); setAnswer(''); setResult(undefined); setOutcome(undefined); setStatus('查询中')
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: 'user', content: question, result: null }])
     let activeId = conversationId
     try {
@@ -75,19 +77,18 @@ function App() {
           if (kind === 'text') setAnswer(previous => previous + data.delta)
           if (kind === 'result') setResult(data)
           if (kind === 'error') setStatus(data.message)
-          if (kind === 'done') { terminalStatus = data.status; if (data.status === 'completed') setStatus('查询完成') }
+          if (kind === 'done') { terminalStatus = data.status; setOutcome(data.outcome); setStatus(data.outcome?.status === 'success' ? '查询完成' : '') }
         }
         if (done) break
       }
       if (!terminalStatus) throw new Error('响应流中断')
-      if (terminalStatus !== 'completed') return
       if (activeId) {
         const detail = await fetch(`/api/conversations/${encodeURIComponent(activeId)}`)
-        if (detail.ok) { setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined) }
+        if (detail.ok) { setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined); setOutcome(undefined) }
         await loadHistory()
       }
       setQuestion('')
-    } catch { setStatus('连接中断或服务不可用，请重试') }
+    } catch { setAnswer(''); setResult(undefined); setOutcome({ status: 'model_error', reason: '连接中断或服务不可用，请重试' }); setStatus('') }
     finally { setBusy(false) }
   }
   return <Layout className="shell">
@@ -107,15 +108,15 @@ function App() {
       <div className="transcript" ref={transcriptRef}>
         {messages.map(message => <div className="turn" key={message.id}>
           {message.role === 'user' ? <div className="user-turn">{message.content}</div> : <Card className="answer-card" title="说明">
-            <AnswerBody text={message.content} />
+            <AnswerBody text={message.outcome && message.outcome.status !== 'success' ? message.outcome.reason : message.content} />
             <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
           </Card>}
           {message.result && <ResultView data={message.result} />}
         </div>)}
         {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>{spaceId === 'orders' ? '例如：查询各订单状态的订单金额' : '例如：查询今年各城市的销售额'}</p></Card>}
         {status && <p className="status">{status}</p>}
-        {answer && <Card className="answer-card" title="说明"><AnswerBody text={answer} /></Card>}
-        {result && <ResultView data={result} />}
+        {(answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={outcome && outcome.status !== 'success' ? outcome.reason : answer} /></Card>}
+        {result && (!outcome || outcome.status === 'success') && <ResultView data={result} />}
       </div>
       <div className="composer">
         <div className="ask">

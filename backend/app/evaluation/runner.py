@@ -207,6 +207,7 @@ def _observation_from_response(response):
         'text': response.get('text'),
         'error': response.get('error'),
         'done': response.get('done'),
+        'outcome': response.get('outcome'),
     }
 
 
@@ -224,6 +225,7 @@ def _order_report(case, observation, reason=None, response=None, expected=None):
         'evaluation_status': verdict['evaluation_status'],
         'status': _LEGACY_STATUS[verdict['evaluation_status']],
         'failure_stage': verdict.get('failure_stage'),
+        'outcome': observation.get('outcome'),
         'leaked': verdict.get('leaked', 0),
     }
     if reason:
@@ -341,8 +343,11 @@ def send(client, question, conversation_id=None):
             result['text'] = result.get('text', '') + payload.get('delta', '')
         elif event == 'done':
             result['done'] = payload.get('status')
+            result['outcome'] = payload.get('outcome')
         elif event == 'error':
             result['error'] = payload if isinstance(payload, dict) else True
+    if 'done' not in result:
+        result['outcome'] = {'status': 'model_error', 'reason': '响应流中断'}
     return result
 
 

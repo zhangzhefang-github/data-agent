@@ -145,9 +145,9 @@ def _validator_observation(exc):
     """观察只带校验器原文。校正映射为需要澄清，拒绝保持拒绝，不另写句子。"""
     message = str(exc).strip()
     if isinstance(exc, SqlCorrection):
-        return {"text": message, "sql_correction": True, "done": "completed"}
+        return {"outcome": {"status": "validator_error", "reason": message}, "done": "failed"}
     if isinstance(exc, SqlRejected):
-        return {"text": message, "done": "completed"}
+        return {"outcome": {"status": "refused", "reason": message}, "done": "completed"}
     return {"error": {"code": "validator_error", "message": message}, "done": "failed"}
 
 
@@ -289,6 +289,7 @@ def _score_case(case, observation):
         "id": case["case_id"],
         "evaluation_status": evaluation,
         "execution_status": verdict["execution_status"],
+        "outcome": observation.get("outcome"),
         "proves_model_sql": False,
         "actual_columns": actual_columns,
         "actual_rows": actual_rows,

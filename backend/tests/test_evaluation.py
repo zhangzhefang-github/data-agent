@@ -122,6 +122,7 @@ def test_orders_dataset_scores_rows_aggregates_rejection_and_followup():
     assert bare_error['execution_status'] == 'model_error'
     refused = score_orders_case(cases['reject_average'], {
         'text': '平均订单金额尚未发布，不能返回结果',
+        'outcome': {'status': 'refused', 'reason': '平均订单金额尚未发布'},
         'done': 'completed',
     })
     assert refused['execution_status'] == 'refused'
@@ -148,9 +149,9 @@ def test_orders_dataset_scores_rows_aggregates_rejection_and_followup():
     }})
     assert shifted['failure_stage'] == 'prior_period'
 
-    scope = score_orders_case(cases['query_scope'], {'text': '可查询的数据范围'}, '可查询的数据范围')
+    scope = score_orders_case(cases['query_scope'], {'text': '可查询的数据范围', 'done': 'completed'}, '可查询的数据范围')
     assert scope['status'] == 'passed'
-    assert score_orders_case(cases['query_scope'], {'text': '改写后的范围'}, '可查询的数据范围')['failure_stage'] == 'result'
+    assert score_orders_case(cases['query_scope'], {'text': '改写后的范围', 'done': 'completed'}, '可查询的数据范围')['failure_stage'] == 'result'
 
 
 def test_orders_evaluation_skips_without_duckdb_or_model_key(monkeypatch):
@@ -236,3 +237,16 @@ def test_orders_scope_question_returns_the_authorization_text(monkeypatch, tmp_p
     monkeypatch.setenv('SALES_DUCKDB_PATH', str(tmp_path / 'unused.duckdb'))
     report = runner.run_orders('query_scope')
     assert report['cases'][0]['status'] == 'passed'
+
+
+def test_orders_scoring_uses_terminal_outcome_not_partial_text_or_errors():
+    cases = {case['id']: case for case in load_orders_dataset()['cases']}
+    case = cases['reject_average']
+    for response in [
+        {'text': '不能查询，请补充'},
+        {'text': '不能查询', 'error': {'message': '未授权'}, 'done': 'failed'},
+        {'text': '不能查询', 'outcome': {'status': 'model_error', 'reason': '失败'}},
+    ]:
+        assert score_orders_case(case, response)['evaluation_status'] == 'ERROR'
+    result = score_orders_case(case, {'text': '查询成功', 'outcome': {'status': 'refused', 'reason': '未授权'}})
+    assert result['evaluation_status'] == 'PASS'

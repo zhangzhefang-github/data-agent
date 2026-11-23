@@ -514,3 +514,36 @@ def test_context_coverage_stops_after_two_supplements(order_chat, monkeypatch):
     assert [reply["remaining_coverage"] for reply in replies] == [1, 0]
     assert events["done"]["status"] == "failed"
     assert "result" not in events
+
+
+def test_terminal_refusal_is_shared_with_history(order_chat):
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, ["SELECT secret FROM orders"])
+        assert events['done']['outcome']['status'] == 'refused'
+        history = client.get('/api/conversations/' + events['conversation']['conversation_id']).json()
+        assert history['messages'][-1]['outcome'] == events['done']['outcome']
+        assert history['messages'][-1]['result'] is None
+
+
+def test_clarification_outcome_overrides_partial_text_and_persists(order_chat, monkeypatch):
+    class Run:
+        async def stream_events(self):
+            yield SimpleNamespace(type='raw_response_event', data=SimpleNamespace(type='response.output_text.delta', delta='正在查询'))
+            args = json.dumps({'sql': '', 'clarification': '客户姓名不可查，请确认是否只查订单金额。'})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id='clarify', tool_arguments=args)
+            await tool.on_invoke_tool(context, args)
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = agent.tools[0]
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, 'run_streamed', runner)
+    with TestClient(main.app) as client:
+        from app.evaluation.runner import send
+        response = send(client, '按客户姓名查询订单金额')
+        assert response['outcome'] == {'status': 'clarification_required', 'reason': '客户姓名不可查，请确认是否只查订单金额。'}
+        history = client.get('/api/conversations/' + response['conversation_id']).json()
+        assert history['messages'][-1]['outcome'] == response['outcome']
+        assert history['messages'][-1]['result'] is None

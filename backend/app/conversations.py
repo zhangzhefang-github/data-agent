@@ -29,6 +29,8 @@ def connect(path: Path):
             FOREIGN KEY (message_id) REFERENCES messages(id)
         );
     ''')
+    if 'outcome' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
+        db.execute('ALTER TABLE messages ADD COLUMN outcome TEXT')
     with closing(db), db:
         yield db
 
@@ -52,21 +54,21 @@ def get(path: Path, conversation_id: str) -> dict | None:
         if row is None:
             return None
         messages = db.execute('''SELECT messages.id, messages.role, messages.content, messages.result,
-            messages.created_at, feedback.rating AS feedback FROM messages
+            messages.created_at, messages.outcome, feedback.rating AS feedback FROM messages
             LEFT JOIN feedback ON feedback.message_id = messages.id
             WHERE messages.conversation_id = ? ORDER BY messages.rowid''', (conversation_id,)).fetchall()
     return {
         'id': row['id'], 'title': row['title'], 'created_at': row['created_at'],
         'last_query': json.loads(row['last_query']) if row['last_query'] else None,
-        'messages': [{**dict(message), 'result': json.loads(message['result']) if message['result'] else None} for message in messages],
+        'messages': [{**dict(message), 'result': json.loads(message['result']) if message['result'] else None, 'outcome': json.loads(message['outcome']) if message['outcome'] else None} for message in messages],
     }
 
 
-def add_message(path: Path, conversation_id: str, role: str, content: str, result: dict | None = None, query: dict | None = None) -> str:
+def add_message(path: Path, conversation_id: str, role: str, content: str, result: dict | None = None, query: dict | None = None, outcome: dict | None = None) -> str:
     message_id = str(uuid.uuid4())
     with connect(path) as db:
-        db.execute('INSERT INTO messages (id, conversation_id, role, content, result) VALUES (?, ?, ?, ?, ?)',
-                   (message_id, conversation_id, role, content, json.dumps(result, ensure_ascii=False) if result is not None else None))
+        db.execute('INSERT INTO messages (id, conversation_id, role, content, result, outcome) VALUES (?, ?, ?, ?, ?, ?)',
+                   (message_id, conversation_id, role, content, json.dumps(result, ensure_ascii=False) if result is not None else None, json.dumps(outcome, ensure_ascii=False) if outcome is not None else None))
         if query is not None:
             db.execute('UPDATE conversations SET last_query = ? WHERE id = ?', (json.dumps(query, ensure_ascii=False), conversation_id))
     return message_id

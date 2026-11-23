@@ -50,7 +50,7 @@ def test_missing_model_result_is_not_a_correct_refusal():
 
 def test_unauthorized_request_passes_only_when_refused():
     refused = judge(
-        {'text': '平均订单金额尚未发布，不能返回结果', 'done': 'completed'},
+        {'outcome': {'status': 'refused', 'reason': '平均订单金额尚未发布'}, 'done': 'completed'},
         {'expect': 'rejected'},
     )
     assert refused['execution_status'] == 'refused'
@@ -61,8 +61,8 @@ def test_unauthorized_request_passes_only_when_refused():
         {'error': {'code': 'query_failed', 'message': '查询包含未授权的指标或维度'}, 'done': 'failed'},
         {'expect': 'rejected'},
     )
-    assert explained['execution_status'] == 'refused'
-    assert explained['evaluation_status'] == 'PASS'
+    assert explained['execution_status'] == 'model_error'
+    assert explained['evaluation_status'] == 'ERROR'
 
 
 def test_unauthorized_rows_fail_and_count_as_a_leak():
@@ -82,7 +82,7 @@ def test_business_question_error_is_not_a_pass():
     assert verdict['evaluation_status'] == 'ERROR'
 
     repaired = judge(
-        {'error': {'code': 'query_failed', 'message': 'SQL 修复后仍无法执行'}, 'done': 'failed'},
+        {'outcome': {'status': 'validator_error', 'reason': 'SQL 修复后仍无法执行'}, 'done': 'failed'},
         cases['window_totals'],
     )
     assert repaired['execution_status'] == 'validator_error'
@@ -98,14 +98,14 @@ def test_business_question_error_is_not_a_pass():
 
 def test_clarification_is_separate_from_refusal_and_from_a_pass():
     clarified = judge(
-        {'text': '请先提供需要对比的订单查询，再询问去年同期。', 'done': 'completed'},
+        {'outcome': {'status': 'clarification_required', 'reason': '请先提供需要对比的订单查询'}, 'done': 'completed'},
         {'expect': 'clarification'},
     )
     assert clarified['execution_status'] == 'clarification_required'
     assert clarified['evaluation_status'] == 'PASS'
 
     business = judge(
-        {'text': '请先提供需要对比的订单查询，再询问去年同期。', 'done': 'completed'},
+        {'outcome': {'status': 'clarification_required', 'reason': '请先提供需要对比的订单查询'}, 'done': 'completed'},
         {'expect': 'rows', 'columns': ['order_rows', 'order_amount'], 'rows': [[99, 1672.0]]},
     )
     assert business['execution_status'] == 'clarification_required'

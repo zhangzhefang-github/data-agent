@@ -41,6 +41,8 @@ def judge(observation, expected):
     execution_status = _execution_status(observation, expected)
     if execution_status in _ERROR_EXECUTIONS:
         return _verdict(execution_status, 'ERROR')
+    if execution_status in ('refused', 'clarification_required') and isinstance(observation.get('result'), dict) and observation['result'].get('rows'):
+        return _verdict(execution_status, 'FAIL', leaked=1, failure_stage='rejection')
     if execution_status == 'refused':
         if expected.get('expect') == 'rejected':
             return _verdict('refused', 'PASS')
@@ -62,58 +64,25 @@ def _verdict(execution_status, evaluation_status, leaked=0, failure_stage=None):
 
 
 def _execution_status(observation, expected):
-    code, message = _error_parts(observation.get('error'))
-    text = (observation.get('text') or '').strip()
-    if observation.get('timeout') or code == 'query_timeout' or (message and '超时' in message):
+    outcome = observation.get('outcome')
+    if isinstance(outcome, dict):
+        status = outcome.get('status')
+        return status if status in EXECUTION_STATUSES else 'invalid_output'
+    code = (observation.get('error') or {})
+    code = code.get('code') if isinstance(code, dict) else None
+    if observation.get('timeout') or code == 'query_timeout':
         return 'timeout'
+    if code in ('database_error', 'validator_error', 'model_error'):
+        return code
+    if observation.get('error') or observation.get('done') == 'failed':
+        return 'model_error'
     if observation.get('no_model_result'):
         return 'invalid_output'
-    if code == 'database_error' or _contains_any(message, _DATABASE_MARKERS):
-        return 'database_error'
-    if code == 'validator_error' or message in _VALIDATOR_MESSAGES:
-        return 'validator_error'
-    if code == 'model_error':
-        return 'model_error'
-    # 校验器要求修正时，执行状态是需要澄清。原文没有澄清标记也不另写一句。
-    if observation.get('sql_correction'):
-        return 'clarification_required'
-    result = observation.get('result')
-    if isinstance(result, dict) and (result.get('rows') or not observation.get('error')):
+    if isinstance(observation.get('result'), dict):
         return 'success'
-    if _contains_any(text, _CLARIFICATION_MARKERS):
-        return 'clarification_required'
-    if expected.get('expect') == 'scope' and not observation.get('error'):
+    if expected.get('expect') == 'scope' and observation.get('done') == 'completed':
         return 'success'
-    if _refusal_explanation(text, message):
-        return 'refused'
-    if observation.get('error') or message:
-        return 'model_error'
     return 'invalid_output'
-
-
-def _error_parts(error):
-    if isinstance(error, dict):
-        message = error.get('message')
-        message = message.strip() if isinstance(message, str) else ''
-        return error.get('code'), message or None
-    if isinstance(error, str):
-        message = error.strip()
-        return None, message or None
-    return None, None
-
-
-def _contains_any(text, markers):
-    return bool(text) and any(marker in text for marker in markers)
-
-
-def _refusal_explanation(text, message):
-    for candidate in (text, message):
-        if not candidate or candidate == _GENERIC_MODEL_ERROR or candidate in _VALIDATOR_MESSAGES:
-            continue
-        if '超时' in candidate:
-            continue
-        return True
-    return False
 
 
 def _score_success(observation, expected):
