@@ -1,5 +1,6 @@
 """Validate and execute one read-only DuckDB SELECT for the order Space."""
 
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -8,7 +9,9 @@ from time import monotonic
 
 import duckdb
 from sqlglot import exp, parse, parse_one
-from sqlglot.errors import ParseError
+from sqlglot.errors import OptimizeError, ParseError
+from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from app.query import physical_value
 
@@ -207,139 +210,29 @@ def _dimension_column(node, names, qualifier: str, aliases: dict[str, str], anch
     return bool(physical and physical != anchor and node.name.lower() in join_keys.get(physical, ()))
 
 
-_ORDER_AMOUNT_COLUMNS = {
-    "amount", "credit_card_amount", "coupon_amount", "bank_transfer_amount", "gift_card_amount",
-}
-
-
-def _cte_queries(select: exp.Select) -> dict[str, exp.Select]:
-    with_ = select.args.get("with")
-    if with_ is None:
-        return {}
-    queries = {}
-    for cte in with_.expressions:
-        body = cte.this
-        if not isinstance(body, exp.Select):
-            raise SqlRejected("WITH 里只写 SELECT")
-        queries[cte.alias_or_name.lower()] = body
-    return queries
+_FANOUT_MESSAGE = "订单笔数和订单金额要先把支付明细按订单汇总，再连接。未汇总的支付连接会放大订单行"
 
 
 def _needs_flexible_sql(tree: exp.Select, catalog: dict) -> bool:
     if tree.args.get("with") or tree.args.get("distinct") or tree.args.get("qualify"):
         return True
     fanouts = {item["table"] for item in catalog.get("fanouts", [])}
-    cte_names = set(_cte_queries(tree))
     for node in tree.walk():
         if isinstance(node, (exp.Subquery, exp.Window)):
             return True
-        if isinstance(node, exp.Table) and node.name.lower() in fanouts and node.name.lower() not in cte_names:
+        if isinstance(node, exp.Table) and node.name.lower() in fanouts:
             return True
     return False
 
 
-def _from_items(select: exp.Select) -> list:
-    items = []
-    source = select.args.get("from")
-    if source is not None:
-        items.append(source.this)
-    for join in select.args.get("joins") or []:
-        items.append(join.this)
-    return items
-
-
-def _grouped_to_key(select: exp.Select, key: str) -> bool:
+def _single_group_column(select: exp.Select) -> exp.Column | None:
     group = select.args.get("group")
-    if group is None:
-        return False
-    names = []
-    for expression in group.expressions:
-        if not isinstance(expression, exp.Column):
-            return False
-        names.append(expression.name.lower())
-    return names == [key]
-
-
-def _analyze_select(select, ctes, fanouts, order_table, cache):
-    identity = id(select)
-    if identity in cache:
-        return cache[identity]
-    multiplies = False
-    reads_orders = False
-    aliases = {}
-    for item in _from_items(select):
-        item_multiplies, item_reads_orders, item_aliases = _analyze_from_item(
-            item, ctes, fanouts, order_table, cache,
-        )
-        multiplies = multiplies or item_multiplies
-        reads_orders = reads_orders or item_reads_orders
-        aliases.update(item_aliases)
-    output_multiplies = False if _grouped_to_key(select, "order_id") else multiplies
-    cache[identity] = (multiplies, reads_orders, aliases, output_multiplies)
-    return cache[identity]
-
-
-def _analyze_from_item(item, ctes, fanouts, order_table, cache):
-    if isinstance(item, exp.Subquery):
-        if not isinstance(item.this, exp.Select):
-            raise SqlRejected("子查询只写 SELECT")
-        multiplies, reads_orders, _, output_multiplies = _analyze_select(
-            item.this, ctes, fanouts, order_table, cache,
-        )
-        alias = (item.alias_or_name or "").lower()
-        return output_multiplies, reads_orders, ({alias: "subquery"} if alias else {})
-    if not isinstance(item, exp.Table):
-        raise SqlRejected("查询包含未授权的表关联")
-    name = item.name.lower()
-    alias = (item.alias or name).lower()
-    labels = {alias: name, name: name}
-    if name in ctes:
-        _, _, _, output_multiplies = _analyze_select(ctes[name], ctes, fanouts, order_table, cache)
-        _, reads_orders, _, _ = _analyze_select(ctes[name], ctes, fanouts, order_table, cache)
-        return output_multiplies, reads_orders, labels
-    if name == order_table:
-        return False, True, labels
-    if name in fanouts:
-        return True, False, labels
-    return False, False, labels
-
-
-def _local_aggregates(select: exp.Select) -> list:
-    found = []
-
-    def visit(node, nested: bool) -> None:
-        if nested:
-            return
-        if isinstance(node, (exp.Sum, exp.Count)):
-            found.append(node)
-        for child in node.iter_expressions():
-            visit(child, nested or (isinstance(child, exp.Select) and child is not select))
-
-    visit(select, False)
-    return found
-
-
-def _is_order_measure(node, aliases: dict[str, str], order_table: str) -> bool:
-    if isinstance(node, exp.Count):
-        return isinstance(node.this, exp.Star) and not node.expressions
-    if not isinstance(node, exp.Sum) or not isinstance(node.this, exp.Column):
-        return False
-    if node.this.name.lower() not in _ORDER_AMOUNT_COLUMNS:
-        return False
-    qualifier = node.this.table.lower()
-    if not qualifier:
-        return True
-    return aliases.get(qualifier, qualifier) == order_table
-
-
-def _reject_multiplied_order_measures(tree: exp.Select, ctes, fanouts, order_table) -> None:
-    cache = {}
-    for select in tree.find_all(exp.Select):
-        multiplies, reads_orders, aliases, _ = _analyze_select(select, ctes, fanouts, order_table, cache)
-        if not (multiplies and reads_orders):
-            continue
-        if any(_is_order_measure(node, aliases, order_table) for node in _local_aggregates(select)):
-            raise SqlRejected("订单笔数和订单金额要先把支付明细按订单汇总，再连接。未汇总的支付连接会放大订单行")
+    if group is None or len(group.expressions) != 1:
+        return None
+    if any(value for name, value in group.args.items() if name != "expressions"):
+        return None
+    key = group.expressions[0]
+    return key if isinstance(key, exp.Column) else None
 
 
 def _collect_order_dates(tree: exp.Select) -> list[exp.Literal]:
@@ -387,32 +280,229 @@ def _cap_limit(tree: exp.Select) -> None:
     tree.set("limit", exp.Limit(expression=exp.Literal.number(cap)))
 
 
-def _validate_flexible_sql(tree: exp.Select, catalog: dict):
+def _qualify_authorized_fields(tree: exp.Select, physical: dict) -> exp.Select:
+    checked = tree.copy()
+    schema = {
+        "main": {table: dict.fromkeys(dataset["columns"], "UNKNOWN") for table, dataset in physical.items()}
+    }
+    try:
+        for scope in traverse_scope(checked):
+            if not isinstance(scope.expression, exp.Select):
+                raise SqlRejected("子查询只写 SELECT")
+            for table in scope.tables:
+                if not table.db and isinstance(scope.sources.get(table.alias_or_name), Scope):
+                    continue
+                if not _plain_table(table) or table.name.lower() not in physical:
+                    raise SqlRejected("查询包含未授权的表")
+                table.set("db", exp.to_identifier("main"))
+        qualify(
+            checked, dialect="duckdb", schema=schema, infer_schema=False,
+            expand_stars=False, identify=False, quote_identifiers=False,
+        )
+    except OptimizeError:
+        raise SqlRejected("查询包含未授权的指标或维度") from None
+
+    # SQLGlot 允许部分 HAVING 和 QUALIFY 引用保持未限定；只接受已验证的输出别名。
+    for scope in traverse_scope(checked):
+        outputs = set(scope.expression.named_selects)
+        for node in scope.walk():
+            if isinstance(node, exp.Star) and not _is_count_star(node):
+                raise SqlCorrection("请写出明确的结果列")
+            if isinstance(node, exp.Column) and not node.table and node.name not in outputs:
+                raise SqlRejected("查询包含未授权的指标或维度")
+    return checked
+
+
+def _is_count_star(node: exp.Star) -> bool:
+    return isinstance(node.parent, exp.Count) and not any(node.args.values())
+
+
+def _validate_flexible_sql(tree: exp.Select, catalog: dict, physical: dict, metrics: dict):
     if any(isinstance(expression, exp.Star) for expression in tree.expressions):
         raise SqlCorrection("请写出明确的结果列")
-    order_table = _order_table(catalog)["table"]
-    physical = {item["table"] for item in catalog.get("physical_tables", [])}
-    physical.add(order_table)
-    fanouts = {
-        item["table"]: item["key"]
-        for item in catalog.get("fanouts", [])
-        if item["anchor"] == order_table
-    }
-    ctes = _cte_queries(tree)
-    for table in tree.find_all(exp.Table):
-        name = table.name.lower()
-        if name in ctes:
-            continue
-        if name not in physical:
-            raise SqlRejected("查询包含未授权的表")
-        table.set("db", exp.to_identifier("main"))
-    _reject_multiplied_order_measures(tree, ctes, fanouts, order_table)
+    tree = _validate_order_semantics(tree, catalog, physical, metrics)
     _rewrite_status_literals(tree, catalog)
     _cap_limit(tree)
     columns = [expression.alias_or_name.lower() for expression in tree.expressions]
-    if len(set(columns)) != len(columns):
-        raise SqlCorrection("请使用唯一的结果列名")
     return tree, columns, _collect_order_dates(tree)
+
+
+@dataclass(frozen=True)
+class _RowCount:
+    metric: str
+    key: str | None
+
+
+@dataclass(frozen=True)
+class _MetricColumn:
+    metric: str
+    aggregated: bool = False
+
+
+@dataclass(frozen=True)
+class _ScopeMeasures:
+    summable_columns: dict[str, _MetricColumn]
+    row_count: _RowCount | None = None
+    reads_orders: bool = False
+    payment_fanout: bool = False
+    unique_key: str | None = None
+
+
+def _dataset_measures(catalog, physical, metrics, order_table: str, fanouts: dict) -> dict[str, _ScopeMeasures]:
+    measures = {}
+    for table, dataset in physical.items():
+        # 已授权的支付明细保留行计数和金额聚合，公开别名由后续指标发布定义。
+        is_payment_mart = dataset["id"] == "payment_mart"
+        amounts = {}
+        if is_payment_mart and "amount" in dataset["columns"]:
+            amounts["amount"] = _MetricColumn("payment_amount")
+        count = _RowCount("payment_rows", None) if is_payment_mart else None
+        measures[table] = _ScopeMeasures(
+            amounts, count, reads_orders=table == order_table, payment_fanout=table in fanouts,
+            unique_key=dataset["row_key"],
+        )
+
+    tables_by_dataset = {dataset["id"]: table for table, dataset in physical.items()}
+    for name, expression in metrics.items():
+        table = tables_by_dataset[catalog["metrics"][name]["model"]]
+        current = measures[table]
+        if isinstance(expression, exp.Sum):
+            current.summable_columns[expression.this.name] = _MetricColumn(name)
+        elif isinstance(expression, exp.Count):
+            count = _RowCount(name, physical[table]["row_key"])
+            measures[table] = replace(current, row_count=count)
+    return measures
+
+
+def _aggregate_metric(value, measures: dict[str, _ScopeMeasures]) -> str | None:
+    if isinstance(value, exp.Sum) and isinstance(value.this, exp.Column):
+        source = _column_metric(value.this, measures)
+        return source.metric if source else None
+    if isinstance(value, exp.Count):
+        metrics = {
+            source.row_count.metric for alias, source in measures.items()
+            if source.row_count is not None and _matches_row_count(value, {alias: source.row_count.key})
+        }
+        if len(metrics) == 1:
+            return metrics.pop()
+    return None
+
+
+def _column_metric(column: exp.Column, measures: dict[str, _ScopeMeasures]) -> _MetricColumn | None:
+    source = measures.get(column.table)
+    return source.summable_columns.get(column.name) if source else None
+
+
+def _joins_preserve_rows(select: exp.Select, base: str, measures: dict[str, _ScopeMeasures]) -> bool:
+    source = select.args.get("from")
+    if source is None or source.this.alias_or_name != base:
+        return False
+    joined = {base}
+    for join in select.args.get("joins") or ():
+        if join.side not in {"", "LEFT"} or join.kind not in {"", "INNER", "OUTER"}:
+            return False
+        alias = join.this.alias_or_name
+        target = measures.get(alias)
+        on = join.args.get("on")
+        if not target or not target.unique_key or not on:
+            return False
+        predicates = on.flatten() if isinstance(on, exp.And) else (on,)
+        if not any(
+            isinstance(predicate, exp.EQ)
+            and isinstance(other, exp.Column) and other.table in joined
+            and isinstance(key, exp.Column) and key.table == alias and key.name == target.unique_key
+            for predicate in predicates
+            for key, other in ((predicate.this, predicate.expression), (predicate.expression, predicate.this))
+        ):
+            return False
+        joined.add(alias)
+    return True
+
+
+def _select_row_count(select: exp.Select, measures: dict[str, _ScopeMeasures]) -> _RowCount | None:
+    counted = [(alias, source.row_count) for alias, source in measures.items() if source.row_count is not None]
+    if len(counted) != 1:
+        return None
+    (alias, source), = counted
+    if len(measures) != 1 and not _joins_preserve_rows(select, alias, measures):
+        return None
+    key = next((selection.alias_or_name for selection in select.selects
+                if _column(selection.unalias(), {source.key}, alias)), None)
+    if select.args.get("group"):
+        if not _column(_single_group_column(select), {source.key}, alias):
+            return None
+    elif any(not isinstance(selection.unalias(), (exp.Column, exp.Window)) for selection in select.selects):
+        return None
+    if select.args.get("distinct") and key is None:
+        return None
+    return _RowCount(source.metric, key)
+
+
+def _validate_order_semantics(tree: exp.Select, catalog: dict, physical: dict, metrics: dict) -> exp.Select:
+    tree = _qualify_authorized_fields(tree, physical)
+    order_table = _order_table(catalog)["table"]
+    fanouts = {item["table"]: item["key"] for item in catalog.get("fanouts", []) if item["anchor"] == order_table}
+    order_metrics = {name for name in metrics if catalog["metrics"][name]["model"] == physical[order_table]["id"]}
+    physical_measures = _dataset_measures(catalog, physical, metrics, order_table, fanouts)
+    measures_by_select = {}
+    payment_order_keys = set(fanouts.values())
+    for scope in traverse_scope(tree):
+        measures = {
+            alias: measures_by_select[id(source.expression)] if isinstance(source, Scope) else physical_measures[source.name.lower()]
+            for alias, (_, source) in scope.selected_sources.items()
+        }
+        select = scope.expression
+        names = [selection.alias_or_name.lower() for selection in select.selects]
+        if len(set(names)) != len(names):
+            raise SqlCorrection("请使用唯一的结果列名")
+        reads_orders = any(source.reads_orders for source in measures.values())
+        multiplies = any(source.payment_fanout for source in measures.values())
+        aggregates = {}
+        for node in scope.walk():
+            if not isinstance(node, exp.AggFunc):
+                continue
+            if multiplies and reads_orders and isinstance(node, exp.Count) and isinstance(node.this, exp.Star):
+                raise SqlRejected(_FANOUT_MESSAGE)
+            metric = _aggregate_metric(node, measures)
+            if metric is None:
+                raise SqlRejected("查询包含未授权的指标或维度")
+            if multiplies and isinstance(node, exp.Sum) and metric in order_metrics:
+                raise SqlRejected(_FANOUT_MESSAGE)
+            aggregates[node] = _MetricColumn(metric, aggregated=True)
+
+        output = {}
+        for selection in select.selects:
+            value = selection.unalias()
+            is_window = isinstance(value, exp.Window)
+            if is_window:
+                value = value.this
+            if isinstance(value, exp.Column):
+                metric = _column_metric(value, measures)
+            elif isinstance(value, (exp.Sum, exp.Count)):
+                metric = aggregates[value]
+            elif is_window and (isinstance(value, exp.RowNumber) or (
+                isinstance(value, exp.Anonymous) and not value.expressions
+                and value.name.upper() in {"RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST"}
+            )):
+                metric = None
+            elif isinstance(value, exp.Subquery) and len(value.this.selects) == 1:
+                metric = measures_by_select[id(value.this)].summable_columns.get(value.this.selects[0].alias_or_name)
+                if metric is None or not metric.aggregated:
+                    raise SqlRejected("标量子查询须返回一个已授权的汇总值")
+            else:
+                raise SqlRejected("查询包含未授权的指标或维度")
+            name = selection.alias_or_name
+            if scope.is_root and name in metrics and metric != _MetricColumn(name, aggregated=True):
+                raise SqlCorrection(f"指标 {name} 须使用已发布的聚合口径")
+            if metric is not None:
+                output[name] = metric
+        group_key = _single_group_column(select)
+        row_count = _select_row_count(select, measures)
+        measures_by_select[id(select)] = _ScopeMeasures(
+            output, row_count, reads_orders=reads_orders, unique_key=row_count.key if row_count else None,
+            payment_fanout=multiplies and (not group_key or group_key.name.lower() not in payment_order_keys),
+        )
+    return tree
 
 
 def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
@@ -427,8 +517,10 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     if len(statements) != 1 or not isinstance(statements[0], exp.Select):
         raise SqlRejected("只允许单条 SELECT 查询")
     tree = statements[0]
+    physical = {item["table"]: item for item in catalog["physical_tables"]}
+    metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
     if _needs_flexible_sql(tree, catalog):
-        return _validate_flexible_sql(tree, catalog)
+        return _validate_flexible_sql(tree, catalog, physical, metrics)
     supported = {"expressions", "from", "joins", "where", "group", "order", "limit", "having"}
     if any(value and key not in supported for key, value in tree.args.items()):
         raise SqlRejected("订单查询只支持单表汇总或已授权的等值关联")
@@ -463,7 +555,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     def dimension_column(node, names) -> bool:
         return _dimension_column(node, names, qualifier, aliases, anchor, join_keys)
 
-    metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
+    row_key = physical[anchor]["row_key"]
     columns = []
     grouped = []
     missing_aliases = []
@@ -473,10 +565,10 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
         if dimension_column(value, dimensions) and name == value.name.lower():
             grouped.append(name)
         elif name in metrics:
-            if not _matches_metric(value, metrics[name], qualifier):
+            if not _matches_metric(value, metrics[name], qualifier, row_key):
                 raise SqlCorrection(f"指标 {name} 须使用已发布的聚合口径")
         else:
-            matching = [metric for metric, expression in metrics.items() if _matches_metric(value, expression, qualifier)]
+            matching = [metric for metric, expression in metrics.items() if _matches_metric(value, expression, qualifier, row_key)]
             if len(matching) != 1:
                 if _counts_customer_identifier(value):
                     raise SqlCorrection("没有已发布的客户数。请从订单表按客户标识分组，并使用订单笔数。")
@@ -504,7 +596,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
                 name = value.name.lower()
             else:
                 name = next((name for name in columns if name in metrics and _matches_metric(
-                    value, metrics[name], qualifier,
+                    value, metrics[name], qualifier, row_key,
                 )), None)
             if name is None:
                 raise SqlRejected("排序限于已选择的指标及维度")
@@ -527,6 +619,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     else:
         cap = MAX_ROWS
     tree.set("limit", exp.Limit(expression=exp.Literal.number(cap)))
+    _validate_order_semantics(tree, catalog, physical, metrics)
     return tree, columns, dates
 
 
@@ -572,12 +665,24 @@ def _counts_customer_identifier(value) -> bool:
     )
 
 
-def _matches_metric(value, expected, qualifier):
+def _matches_row_count(value, sources) -> bool:
+    if not isinstance(value, exp.Count) or value.expressions or not sources:
+        return False
+    target = value.this
+    if isinstance(target, exp.Star):
+        return _is_count_star(target)
+    if isinstance(target, exp.Distinct) and len(target.expressions) == 1:
+        column = target.expressions[0]
+        return (isinstance(column, exp.Column) and _in_main(column)
+                and column.name.lower() == sources.get(column.table.lower()))
+    return False
+
+
+def _matches_metric(value, expected, qualifier, row_key=None):
     if type(value) is not type(expected):
         return False
     if isinstance(expected, exp.Count):
-        return (isinstance(value.this, exp.Star) and not any(value.this.args.values())
-                and not value.expressions)
+        return _matches_row_count(value, {qualifier: row_key, "": row_key})
     return isinstance(expected, exp.Sum) and _column(value.this, {expected.this.name}, qualifier)
 
 

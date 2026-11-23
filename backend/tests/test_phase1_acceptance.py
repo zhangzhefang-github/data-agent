@@ -255,25 +255,96 @@ def test_reviewed_window_is_accepted_at_the_order_chat_entry(monkeypatch, tmp_pa
     assert jaffle_shop_path.read_bytes() == before
 
 
-def test_with_preaggregated_payments_keeps_order_and_payment_totals(jaffle_shop_path: Path):
-    sql = """
-        WITH paid AS (
-            SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount
-            FROM payments
+@pytest.mark.parametrize("order_count", ["COUNT(*)", "COUNT(DISTINCT o.order_id)"])
+def test_with_preaggregated_payments_keeps_order_and_payment_totals(jaffle_shop_path: Path, order_count: str):
+    sql = f"""
+        WITH payment_summary AS (
+            SELECT order_id, COUNT(*) AS payment_count, SUM(amount) AS payment_amount
+            FROM main.payments
+            WHERE order_date BETWEEN CAST('2018-01-01' AS DATE) AND CAST('2018-04-09' AS DATE)
             GROUP BY order_id
         )
-        SELECT COUNT(*) AS order_rows,
+        SELECT {order_count} AS order_rows,
                SUM(o.amount) AS order_amount,
-               SUM(paid.payment_rows) AS payment_rows,
-               SUM(paid.payment_amount) AS payment_amount
-        FROM orders AS o
-        JOIN paid ON paid.order_id = o.order_id
-        WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+               SUM(ps.payment_count) AS payment_rows,
+               SUM(ps.payment_amount) AS payment_amount
+        FROM main.orders AS o
+        JOIN payment_summary AS ps ON o.order_id = ps.order_id
+        WHERE o.order_date BETWEEN CAST('2018-01-01' AS DATE) AND CAST('2018-04-09' AS DATE)
+        LIMIT 500
     """
 
     result = _run(jaffle_shop_path, sql)
 
+    assert result["columns"] == ["order_rows", "order_amount", "payment_rows", "payment_amount"]
     assert result["rows"] == [[99, 1672.0, 113, 1672.0]]
+
+
+def test_filtered_orders_cte_keeps_its_order_grain(jaffle_shop_path: Path):
+    sql = """
+        WITH january_orders AS (
+            SELECT order_id, amount FROM orders
+            WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-01-31'
+        )
+        SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+        FROM january_orders
+    """
+
+    assert _run(jaffle_shop_path, sql)["rows"] == [[29, 496.0]]
+
+
+@pytest.mark.parametrize("per_order_sql", [
+    "SELECT o.order_id, o.amount FROM orders o JOIN customers c ON c.customer_id = o.customer_id",
+    "SELECT order_id, SUM(amount) AS amount FROM orders GROUP BY order_id",
+    "SELECT DISTINCT order_id, amount FROM orders",
+])
+def test_order_count_accepts_derived_rows_at_order_grain(jaffle_shop_path: Path, per_order_sql: str):
+    sql = f"WITH per_order AS ({per_order_sql}) SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM per_order"
+
+    assert _run(jaffle_shop_path, sql)["rows"] == [[99, 1672.0]]
+
+
+def test_scalar_subqueries_can_return_authorized_aggregates(jaffle_shop_path: Path):
+    sql = """
+        SELECT (SELECT COUNT(*) FROM orders) AS order_rows,
+               (SELECT SUM(amount) FROM payments) AS payment_amount
+    """
+
+    assert _run(jaffle_shop_path, sql)["rows"] == [[99, 1672.0]]
+
+
+def test_window_can_rank_customers_by_published_order_amount(jaffle_shop_path: Path):
+    sql = """
+        WITH totals AS (
+            SELECT customer_id, SUM(amount) AS order_amount FROM orders GROUP BY customer_id
+        ), ranked AS (
+            SELECT customer_id, order_amount,
+                   ROW_NUMBER() OVER (ORDER BY order_amount DESC, customer_id) AS position
+            FROM totals
+        )
+        SELECT customer_id, order_amount FROM ranked WHERE position = 1
+    """
+
+    assert _run(jaffle_shop_path, sql)["rows"] == [[51, 99.0]]
+
+
+def test_payment_rows_cannot_be_returned_as_order_rows(jaffle_shop_path: Path):
+    with pytest.raises(SqlCorrection, match="已发布的聚合口径"):
+        _run(jaffle_shop_path, "SELECT COUNT(*) AS order_rows FROM payments")
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT internal_note, COUNT(*) AS order_rows FROM orders GROUP BY internal_note",
+    "WITH visible AS (SELECT order_id, internal_note FROM orders) SELECT internal_note FROM visible",
+    "WITH visible AS (SELECT order_id FROM orders WHERE internal_note IS NOT NULL) SELECT order_id FROM visible",
+])
+def test_direct_sql_rejects_fields_outside_space_authorization(tmp_path: Path, sql: str):
+    path = tmp_path / "orders.duckdb"
+    with duckdb.connect(str(path)) as db:
+        db.execute("CREATE TABLE orders (order_id INTEGER, internal_note VARCHAR)")
+
+    with pytest.raises(SqlRejected, match="未授权的指标或维度"):
+        _run(path, sql)
 
 
 def test_payment_method_cte_can_use_a_different_grouping(jaffle_shop_path: Path):
@@ -315,6 +386,18 @@ def test_bare_payment_join_does_not_execute_inflated_order_amount(jaffle_shop_pa
         _run(jaffle_shop_path, sql)
 
 
+def test_fanout_guard_follows_a_renamed_order_amount(jaffle_shop_path: Path):
+    sql = """
+        WITH selected_orders AS (SELECT order_id, amount AS total FROM orders)
+        SELECT SUM(o.total) AS order_amount
+        FROM selected_orders AS o
+        JOIN payments AS p ON p.order_id = o.order_id
+    """
+
+    with pytest.raises(SqlRejected, match="支付明细"):
+        _run(jaffle_shop_path, sql)
+
+
 def test_direct_sql_rejects_month_nps_and_payment_fanout(jaffle_shop_path: Path):
     before = jaffle_shop_path.read_bytes()
     month = "SELECT date_trunc('month', order_date) AS month, SUM(amount) AS order_amount FROM orders GROUP BY 1"
@@ -330,6 +413,25 @@ def test_direct_sql_rejects_month_nps_and_payment_fanout(jaffle_shop_path: Path)
         _run(jaffle_shop_path, nps)
     with pytest.raises(SqlRejected, match="未授权的表关联"):
         _run(jaffle_shop_path, fanout)
+    # 碰到支付明细会走灵活校验。未发布的计算列不能因此放行。
+    payments_nps = "SELECT CAST(100 AS DOUBLE) AS nps FROM payments"
+    invented_nps = """
+        WITH paid AS (
+            SELECT order_id, SUM(amount) AS payment_amount
+            FROM payments
+            GROUP BY order_id
+        )
+        SELECT CAST(
+            100 * SUM(CASE WHEN paid.payment_amount >= o.amount THEN 1 ELSE 0 END)
+            AS DOUBLE
+        ) AS nps
+        FROM orders AS o
+        JOIN paid ON paid.order_id = o.order_id
+    """
+    with pytest.raises(SqlRejected, match="未授权的指标或维度"):
+        _run(jaffle_shop_path, payments_nps)
+    with pytest.raises(SqlRejected, match="未授权的指标或维度"):
+        _run(jaffle_shop_path, invented_nps)
 
     base, inflated = _independent(
         jaffle_shop_path,

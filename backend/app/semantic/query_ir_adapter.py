@@ -71,7 +71,15 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
         "dimension_input_aliases": dimension_input_aliases,
         "instructions": "只使用已发布规范语义模型授权的指标和维度。",
         "physical_tables": [
-            {"id": dataset.id, "table": dataset.physical_object.lower()}
+            {
+                "id": dataset.id,
+                "table": dataset.physical_object.lower(),
+                "columns": sorted(dataset.columns.values()),
+                "row_key": (
+                    dataset.columns.get(dataset.grain[0])
+                    if len(dataset.grain) == 1 and dataset.grain == dataset.primary_key else None
+                ),
+            }
             for dataset in context.sql.datasets
         ],
         "fanouts": _fanouts(context),
