@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
+from app.order_clarification import decide, resume
 from app.direct_sql import (
     SqlCorrection, SqlRejected, SqlTimeout, context_coverage_gap, execute_order_sql,
     order_database_context, prior_order_sql,
@@ -167,6 +168,41 @@ async def chat(request: ChatRequest):
         elif context and context.get("mode") == "orders_duckdb":
             context = None
 
+        effective_question = request.message
+        if direct_sql:
+            pending = conversation.get("pending_clarification") if conversation else None
+            resumed = resume(pending, request.message) if pending else None
+            resolved = set()
+            if resumed:
+                effective_question, resolved = resumed
+            if pending and not resumed and len(request.message.strip()) <= 25 and not re.search(
+                r"另|新问题|重新|多少|什么|查询|统计|列出|哪些|总额|总金额|\?|？", request.message
+            ):
+                message = pending.get("reason", "请选择澄清选项。")
+                yield event("conversation", {"conversation_id": conversation_id})
+                yield event("text", {"delta": message})
+                outcome = {"status": "clarification_required", "reason": message}
+                message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
+                yield event("message", {"id": message_id})
+                yield event("done", {"status": "completed", "outcome": outcome})
+                return
+            if pending:
+                conversations.set_pending(CONVERSATIONS, conversation_id, None)
+            decision = decide(effective_question, resolved)
+            if decision:
+                status, message, kind = decision
+                if kind:
+                    conversations.set_pending(CONVERSATIONS, conversation_id, {
+                        "question": effective_question, "kind": kind, "resolved": sorted(resolved), "reason": message,
+                    })
+                yield event("conversation", {"conversation_id": conversation_id})
+                yield event("text", {"delta": message})
+                outcome = {"status": status, "reason": message}
+                message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
+                yield event("message", {"id": message_id})
+                yield event("done", {"status": "completed", "outcome": outcome})
+                return
+
         if direct_sql and is_query_scope_question(request.message):
             message = render_query_scope(snapshot.authorization)
             yield event("conversation", {"conversation_id": conversation_id})
@@ -288,7 +324,7 @@ async def chat(request: ChatRequest):
         yield event("conversation", {"conversation_id": conversation_id})
         yield event("status", {"status": "running"})
         try:
-            prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{request.message}"
+            prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{effective_question}"
             tools = [get_semantic_catalog, resolve_business_terms, execute_semantic_query]
             instructions = space_instructions(CATALOG)
             run_options = {}
@@ -307,7 +343,7 @@ async def chat(request: ChatRequest):
                     presentation = snapshot.authorization
                 else:
                     presentation = expand_authorization(
-                        snapshot.authorization, request.message, snapshot.object_datasets,
+                        snapshot.authorization, effective_question, snapshot.object_datasets,
                     )
                 instructions = (
                     "你是订单主题空间助手。用 execute_direct_sql 提交 DuckDB SQL。"

@@ -29,6 +29,8 @@ def connect(path: Path):
             FOREIGN KEY (message_id) REFERENCES messages(id)
         );
     ''')
+    if 'pending_clarification' not in {row['name'] for row in db.execute('PRAGMA table_info(conversations)')}:
+        db.execute('ALTER TABLE conversations ADD COLUMN pending_clarification TEXT')
     if 'outcome' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
         db.execute('ALTER TABLE messages ADD COLUMN outcome TEXT')
     with closing(db), db:
@@ -60,6 +62,7 @@ def get(path: Path, conversation_id: str) -> dict | None:
     return {
         'id': row['id'], 'title': row['title'], 'created_at': row['created_at'],
         'last_query': json.loads(row['last_query']) if row['last_query'] else None,
+        'pending_clarification': json.loads(row['pending_clarification']) if row['pending_clarification'] else None,
         'messages': [{**dict(message), 'result': json.loads(message['result']) if message['result'] else None, 'outcome': json.loads(message['outcome']) if message['outcome'] else None} for message in messages],
     }
 
@@ -82,3 +85,9 @@ def save_feedback(path: Path, message_id: str, rating: str) -> bool:
         db.execute('''INSERT INTO feedback (message_id, rating) VALUES (?, ?)
             ON CONFLICT(message_id) DO UPDATE SET rating = excluded.rating''', (message_id, rating))
     return True
+
+
+def set_pending(path: Path, conversation_id: str, pending: dict | None):
+    with connect(path) as db:
+        db.execute('UPDATE conversations SET pending_clarification = ? WHERE id = ?',
+                   (json.dumps(pending, ensure_ascii=False) if pending else None, conversation_id))

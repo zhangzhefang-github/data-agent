@@ -541,3 +541,18 @@ def test_cli_platform_selects_one_mode_and_does_not_pass_a_mock(monkeypatch, cap
         runner.main()
     assert caught.value.code != 0
     assert "PASS" not in capsys.readouterr().out
+
+
+def test_conversation_evaluation_continues_after_structured_clarification():
+    from app.evaluation.platform_run import _chat_observation
+
+    calls = []
+    def send(client, question, conversation_id=None):
+        calls.append((question, conversation_id))
+        if conversation_id is None:
+            return {'conversation_id': 'session', 'outcome': {'status': 'clarification_required', 'reason': '选口径'}}
+        return {'outcome': {'status': 'success', 'reason': '完成'}, 'result': {'rows': [[1]]}}
+
+    result = _chat_observation(None, {'previous_question': '最高的客户是谁', 'question': '按金额'}, send)
+    assert calls == [('最高的客户是谁', None), ('按金额', 'session')]
+    assert result['result']['rows'] == [[1]]

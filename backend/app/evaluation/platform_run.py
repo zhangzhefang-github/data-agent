@@ -226,9 +226,9 @@ def _chat_observation(client, case, send):
     question = case.get("user_question") or case.get("question")
     if "previous_question" in case:
         initial = send(client, case["previous_question"])
-        if not initial.get("conversation_id") or not initial.get("result"):
+        if not initial.get("conversation_id") or not initial.get("result") and (initial.get("outcome") or {}).get("status") != "clarification_required":
             observation = dict(initial)
-            if not initial.get("error") and not initial.get("text") and not initial.get("result"):
+            if not initial.get("error") and not initial.get("text") and not initial.get("result") and (initial.get("outcome") or {}).get("status") != "clarification_required":
                 observation["no_model_result"] = True
             return observation
         return send(client, question, initial["conversation_id"])

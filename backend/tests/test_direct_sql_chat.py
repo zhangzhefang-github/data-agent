@@ -358,7 +358,7 @@ def test_direct_follow_up_keeps_last_success_after_failure_and_shifts_leap_day(o
 def test_customer_count_shape_can_be_repaired_into_a_customer_grouping(order_chat, captured):
     repaired = "SELECT customer_id, COUNT(*) AS order_rows FROM orders GROUP BY customer_id"
     with TestClient(main.app) as client:
-        events, replies = order_chat(client, [captured, repaired], "帮我查一下目前有多少客户")
+        events, replies = order_chat(client, [captured, repaired], "按业务口径查询订单")
     assert "只允许访问已授权的订单表" not in replies[0]["error"]
     assert "客户标识" in replies[0]["error"]
     assert events["done"]["status"] == "completed"
@@ -542,8 +542,55 @@ def test_clarification_outcome_overrides_partial_text_and_persists(order_chat, m
     monkeypatch.setattr(main.Runner, 'run_streamed', runner)
     with TestClient(main.app) as client:
         from app.evaluation.runner import send
-        response = send(client, '按客户姓名查询订单金额')
+        response = send(client, '按业务口径查询订单')
         assert response['outcome'] == {'status': 'clarification_required', 'reason': '客户姓名不可查，请确认是否只查订单金额。'}
         history = client.get('/api/conversations/' + response['conversation_id']).json()
         assert history['messages'][-1]['outcome'] == response['outcome']
         assert history['messages'][-1]['result'] is None
+
+
+def test_pending_ranking_survives_history_and_continues_with_original_date(order_chat):
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [], '2018年最高的客户是谁')
+        assert first['done']['outcome']['status'] == 'clarification_required'
+        assert 'result' not in first
+        cid = first['conversation']['conversation_id']
+        history = client.get(f'/api/conversations/{cid}').json()
+        assert history['pending_clarification']['question'] == '2018年最高的客户是谁'
+        second, replies = order_chat(client, ["SELECT customer_id, SUM(amount) AS order_amount FROM orders WHERE order_date BETWEEN '2018-01-01' AND '2018-12-31' GROUP BY customer_id ORDER BY order_amount DESC"], '按金额', cid)
+        assert second['done']['outcome']['status'] == 'success'
+        assert replies
+        assert client.get(f'/api/conversations/{cid}').json()['pending_clarification'] is None
+
+
+@pytest.mark.parametrize(('question', 'status'), [
+    ('客户姓名是什么', 'clarification_required'),
+    ('客户姓名和订单金额是多少', 'clarification_required'),
+    ('一共有多少个客户', 'clarification_required'),
+    ('成功的订单有多少笔', 'clarification_required'),
+    ('把订单金额和支付金额加在一起是多少', 'clarification_required'),
+    ('最高的客户是谁', 'clarification_required'),
+    ('NPS 是多少', 'refused'),
+    ('查询 stg_payments 和 raw_orders 各有多少行', 'refused'),
+    ('把订单和支付明细按订单标识直接连接后汇总订单金额', 'refused'),
+])
+def test_orders_preflight_has_no_rows_or_model_call(order_chat, question, status):
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [], question)
+        assert events['done']['outcome']['status'] == status
+        assert 'result' not in events
+        assert replies == []
+        history = client.get('/api/conversations/' + events['conversation']['conversation_id']).json()
+        assert history['messages'][-1]['outcome'] == events['done']['outcome']
+
+
+def test_mixed_name_requires_confirmation_and_new_question_clears_pending(order_chat):
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [], '客户姓名和订单金额是多少')
+        cid = first['conversation']['conversation_id']
+        second, replies = order_chat(client, [TOTALS], '只查金额', cid)
+        assert second['done']['outcome']['status'] == 'success' and replies
+        order_chat(client, [], '2018年最高的客户是谁', cid)
+        result, _ = order_chat(client, [TOTALS], '订单总金额是多少', cid)
+        assert result['done']['outcome']['status'] == 'success'
+        assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None

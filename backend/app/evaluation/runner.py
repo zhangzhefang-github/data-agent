@@ -160,7 +160,7 @@ def run_live(case_id=None):
                     if 'previous_question' in case:
                         initial = send(client, case['previous_question'])
                         conversation_id = initial.get('conversation_id')
-                        if not conversation_id or not initial.get('result'):
+                        if not conversation_id or not initial.get('result') and (initial.get('outcome') or {}).get('status') != 'clarification_required':
                             reports.append({'id': case['id'], 'status': 'failed', 'failure_stage': 'semantic_resolution', 'reason': '前一轮查询失败'})
                             continue
                         response = send(client, case['question'], conversation_id)
@@ -311,9 +311,9 @@ def _execute_orders_case(case):
             with TestClient(main.app) as client:
                 if 'previous_question' in case:
                     initial = send(client, case['previous_question'])
-                    if not initial.get('conversation_id') or not initial.get('result'):
+                    if not initial.get('conversation_id') or not initial.get('result') and (initial.get('outcome') or {}).get('status') != 'clarification_required':
                         observation = _observation_from_response(initial)
-                        if not initial.get('error') and not initial.get('text') and not initial.get('result'):
+                        if not initial.get('error') and not initial.get('text') and not initial.get('result') and (initial.get('outcome') or {}).get('status') != 'clarification_required':
                             observation['no_model_result'] = True
                         return _order_report(case, observation, reason='前一轮查询失败')
                     response = send(client, case['question'], initial['conversation_id'])
