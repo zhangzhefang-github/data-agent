@@ -333,6 +333,16 @@ def test_payment_rows_cannot_be_returned_as_order_rows(jaffle_shop_path: Path):
         _run(jaffle_shop_path, "SELECT COUNT(*) AS order_rows FROM payments")
 
 
+def test_payment_count_output_requires_published_alias(jaffle_shop_path: Path):
+    with pytest.raises(SqlCorrection, match="payment_rows"):
+        _run(jaffle_shop_path, "SELECT COUNT(*) AS payment_count FROM payments")
+    with pytest.raises(SqlCorrection, match="payment_rows"):
+        _run(jaffle_shop_path, """
+            WITH paid AS (SELECT order_id, COUNT(*) AS payment_count FROM payments GROUP BY order_id)
+            SELECT SUM(payment_count) AS payment_count FROM paid
+        """)
+
+
 @pytest.mark.parametrize("sql", [
     "SELECT internal_note, COUNT(*) AS order_rows FROM orders GROUP BY internal_note",
     "WITH visible AS (SELECT order_id, internal_note FROM orders) SELECT internal_note FROM visible",

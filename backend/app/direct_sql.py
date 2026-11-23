@@ -494,6 +494,8 @@ def _validate_order_semantics(tree: exp.Select, catalog: dict, physical: dict, m
             name = selection.alias_or_name
             if scope.is_root and name in metrics and metric != _MetricColumn(name, aggregated=True):
                 raise SqlCorrection(f"指标 {name} 须使用已发布的聚合口径")
+            if scope.is_root and metric == _MetricColumn("payment_rows", aggregated=True) and name != "payment_rows":
+                raise SqlCorrection("支付笔数请使用结果列别名 payment_rows")
             if metric is not None:
                 output[name] = metric
         group_key = _single_group_column(select)
