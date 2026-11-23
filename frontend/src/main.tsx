@@ -6,6 +6,11 @@ import 'antd/dist/reset.css'
 import './style.css'
 
 type Outcome = { status: string, reason: string }
+
+function replyText(content: string, outcome?: Outcome | null) {
+  if (content.trim()) return content
+  return outcome?.reason ?? ''
+}
 type Message = { id: string, role: string, content: string, result: Result | null, feedback?: Rating | null, outcome?: Outcome | null }
 type ConversationSummary = { id: string, title: string }
 function App() {
@@ -108,14 +113,14 @@ function App() {
       <div className="transcript" ref={transcriptRef}>
         {messages.map(message => <div className="turn" key={message.id}>
           {message.role === 'user' ? <div className="user-turn">{message.content}</div> : <Card className="answer-card" title="说明">
-            <AnswerBody text={message.outcome && message.outcome.status !== 'success' ? message.outcome.reason : message.content} />
+            <AnswerBody text={replyText(message.content, message.outcome)} />
             <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
           </Card>}
           {message.result && <ResultView data={message.result} />}
         </div>)}
         {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>{spaceId === 'orders' ? '例如：查询各订单状态的订单金额' : '例如：查询今年各城市的销售额'}</p></Card>}
         {status && <p className="status">{status}</p>}
-        {(answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={outcome && outcome.status !== 'success' ? outcome.reason : answer} /></Card>}
+        {(answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={replyText(answer, outcome)} /></Card>}
         {result && (!outcome || outcome.status === 'success') && <ResultView data={result} />}
       </div>
       <div className="composer">

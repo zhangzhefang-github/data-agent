@@ -20,12 +20,15 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
-from app.order_clarification import decide, resume
+from app.order_clarification import (
+    PRESENTATION_REPAIR, decide, is_presentation_choice, mentions_authorized_order_metric,
+    mentions_unpublished_average, mentions_unpublished_share, resume, specified_customer_status_breakdown,
+)
 from app.direct_sql import (
-    SqlCorrection, SqlRejected, SqlTimeout, context_coverage_gap, execute_order_sql,
+    SqlCorrection, SqlRejected, SqlTimeout, _AVERAGE_REPAIR, context_coverage_gap, execute_order_sql,
     order_database_context, prior_order_sql,
 )
-from app.query_scope import is_query_scope_question, render_query_scope
+from app.query_scope import is_query_scope_question, looks_like_scope_answer, render_query_scope
 from app.semantic.query_ir_adapter import catalog_from_semantic_context
 from app.semantic.retrieval import (
     MAX_CONTEXT_COVERAGE, expand_authorization, expansion_payload, include_datasets, is_small_space, short_catalog,
@@ -102,6 +105,28 @@ def conversation_detail(conversation_id: str):
 
 def event(kind: str, payload: dict) -> str:
     return f"event: {kind}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def last_verified_result(conversation: dict | None) -> dict | None:
+    """上一轮已经执行并保存的列和行。没有结果时不编造。"""
+    if not conversation:
+        return None
+    for message in reversed(conversation.get("messages") or []):
+        result = message.get("result")
+        if message.get("role") == "assistant" and isinstance(result, dict) and "rows" in result:
+            return {"columns": result.get("columns") or [], "rows": result["rows"]}
+    return None
+
+
+def visible_answer(streamed: str, outcome: dict) -> str:
+    """落库正文。模型已经写出的回答保留；澄清和失败才用原因作为给人看的字。"""
+    text = streamed.strip()
+    reason = str(outcome.get("reason") or "").strip()
+    if outcome.get("status") == "invalid_output" and text:
+        return streamed
+    if outcome.get("status") != "success" and reason:
+        return reason
+    return streamed
 
 
 def last_year(day: date) -> date:
@@ -262,6 +287,36 @@ async def chat(request: ChatRequest):
             nonlocal attempts, coverage_attempts, query_error, presentation, terminal
             async with query_lock:
                 if clarification:
+                    # 名次、客户和订单状态已经写明，展示顺序不是业务口径。
+                    if (
+                        not result_data
+                        and specified_customer_status_breakdown(effective_question)
+                        and is_presentation_choice(clarification)
+                    ):
+                        attempts += 1
+                        if attempts < 3 and not is_previous_period:
+                            return json.dumps({
+                                "error": PRESENTATION_REPAIR,
+                                "remaining_repairs": 3 - attempts,
+                            }, ensure_ascii=False)
+                        query_error = "SQL 修复后仍无法执行"
+                        terminal = {"status": "validator_error", "reason": query_error}
+                        raise SqlRejected(query_error)
+                    # 平均订单金额和已授权指标已经同时点名，不再问用户要不要平均。
+                    if (
+                        not result_data
+                        and mentions_unpublished_average(effective_question)
+                        and mentions_authorized_order_metric(effective_question)
+                    ):
+                        attempts += 1
+                        if attempts < 3 and not is_previous_period:
+                            return json.dumps({
+                                "error": _AVERAGE_REPAIR,
+                                "remaining_repairs": 3 - attempts,
+                            }, ensure_ascii=False)
+                        query_error = "SQL 修复后仍无法执行"
+                        terminal = {"status": "validator_error", "reason": query_error}
+                        raise SqlRejected(query_error)
                     if not result_data:
                         terminal = {"status": "clarification_required", "reason": clarification}
                         conversations.set_pending(CONVERSATIONS, conversation_id, {
@@ -375,6 +430,9 @@ async def chat(request: ChatRequest):
                     "经典示例只说明方言写法，示例中的表不代表已经授权。"
                     "用户说出时间时写入对应日期条件。用户没有说出时间或状态时查询全部日期或状态。"
                     "问题条件和口径完整明确时立即执行，不要再次确认已明确的条件；不要要求补充可选的筛选、分组、输出列、排序或行数限制。"
+                    "用户已经说出支付笔数和支付金额，并点名信用卡、优惠券、银行转账或礼品卡时，支付笔数就是支付行数，不是订单笔数。直接按 payment_method 分组查询，不要再确认口径。"
+                    "用户已经按订单金额点名前若干位客户，并要求按客户和订单状态统计订单笔数和订单金额时，直接提交这一条分组 SQL，不要询问先展示客户列表还是展示分组。"
+                    "用户已经同时说出平均订单金额和订单笔数或订单金额时，不要向用户确认。直接提交已授权指标的 SQL，不要写平均、除法或未授权别名。"
                     "未写 LIMIT 时使用默认行数上限。"
                     "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
                     "需要用户澄清时，不要执行查询，调用 execute_direct_sql，sql 为空字符串，clarification 填写澄清说明，options 填写可供用户选择的选项文本列表。"
@@ -382,6 +440,7 @@ async def chat(request: ChatRequest):
                     "针对去年同期的附加要求，以服务提供的同期 SQL 为起点，按用户要求调整筛选或分组，不要再次平移日期。"
                     "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
                     "用户询问可查询范围时，只回复提示中的可查询范围原文，不要调用工具。"
+                    "提示中若有最近一次已验证的查询结果，用户要求总结或不再查询时，依据该结果说明，不要再调用工具。"
                 )
                 # 订单 Direct SQL 只保留执行器。目录工具会按问题裁剪授权，和本次提示不是同一份范围。
                 tools = [execute_direct_sql]
@@ -399,6 +458,9 @@ async def chat(request: ChatRequest):
                     )
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
+                    verified = None if is_previous_period else last_verified_result(conversation)
+                    if verified:
+                        prompt += "\n最近一次已验证的查询结果：" + json.dumps(verified, ensure_ascii=False)
                     if is_previous_period:
                         executed_dates = list(dict.fromkeys(re.findall(r"\d{4}-\d{2}-\d{2}", previous_sql)))
                         if executed_dates:
@@ -422,6 +484,22 @@ async def chat(request: ChatRequest):
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
                     answer.append(item.data.delta)
                     yield event("text", {"delta": item.data.delta})
+            text = "".join(answer).strip()
+            # 能力问题应直接给出授权范围。模型若只写了说明，或把内部指令放进澄清，仍改回原文。
+            if (
+                direct_sql and snapshot is not None and not result_data
+                and (terminal is None or terminal.get("status") == "clarification_required")
+                and (is_query_scope_question(request.message) or looks_like_scope_answer(text))
+            ):
+                if terminal and terminal.get("status") == "clarification_required":
+                    conversations.set_pending(CONVERSATIONS, conversation_id, None)
+                message = render_query_scope(snapshot.authorization)
+                outcome = {"status": "success", "reason": message}
+                message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
+                saved = True
+                yield event("message", {"id": message_id})
+                yield event("done", {"status": "completed", "outcome": outcome})
+                return
             if terminal:
                 raise SqlRejected(terminal["reason"])
             if direct_sql and not result_data:
@@ -431,9 +509,19 @@ async def chat(request: ChatRequest):
                 raise ValueError(terminal["reason"])
             if result_data:
                 yield event("result", result_data[-1])
+            content = "".join(answer)
+            # 平均口径未发布时仍返回旁边的授权指标，并在说明里点名原因。
+            if result_data and mentions_unpublished_average(effective_question):
+                note = "平均订单金额尚未发布，以下是已授权的订单笔数和订单金额。"
+                if not content.startswith(note):
+                    content = note + "\n" + content
+            if result_data and mentions_unpublished_share(effective_question):
+                note = "订单占比尚未发布，以下是已授权的订单笔数和订单金额。"
+                if not content.startswith(note):
+                    content = note + "\n" + content
             outcome = {"status": "success", "reason": "查询完成"}
             message_id = conversations.add_message(
-                CONVERSATIONS, conversation_id, "assistant", "".join(answer),
+                CONVERSATIONS, conversation_id, "assistant", content,
                 result_data[-1] if result_data else None, query_data[-1] if query_data else None, outcome=outcome,
             )
             saved = True
@@ -442,7 +530,10 @@ async def chat(request: ChatRequest):
         except asyncio.CancelledError:
             if not saved:
                 outcome = {"status": "model_error", "reason": "响应流中断"}
-                conversations.add_message(CONVERSATIONS, conversation_id, "assistant", "".join(answer), outcome=outcome)
+                conversations.add_message(
+                    CONVERSATIONS, conversation_id, "assistant",
+                    visible_answer("".join(answer), outcome), outcome=outcome,
+                )
             raise
         except Exception as exc:
             logger.error("Agent request failed (%s)", type(exc).__name__)
@@ -458,9 +549,12 @@ async def chat(request: ChatRequest):
                 outcome = {"status": "database_error", "reason": "数据库查询失败"}
             else:
                 outcome = {"status": "model_error", "reason": "查询失败，请检查模型连接和服务配置"}
-            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", "".join(answer), outcome=outcome)
+            content = visible_answer("".join(answer), outcome)
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", content, outcome=outcome)
             yield event("message", {"id": message_id})
-            if outcome["status"] != "clarification_required":
+            reason = str(outcome.get("reason") or "").strip()
+            answer_stands = outcome["status"] == "invalid_output" and content.strip() and content.strip() != reason
+            if outcome["status"] != "clarification_required" and not answer_stands:
                 code = "query_timeout" if outcome["status"] == "timeout" else "query_failed"
                 yield event("error", {"message": outcome["reason"], "code": code})
             yield event("done", {"status": "completed" if outcome["status"] == "clarification_required" else "failed", "outcome": outcome})
