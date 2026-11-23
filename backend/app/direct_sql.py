@@ -317,10 +317,10 @@ def _is_count_star(node: exp.Star) -> bool:
     return isinstance(node.parent, exp.Count) and not any(node.args.values())
 
 
-def _validate_flexible_sql(tree: exp.Select, catalog: dict, physical: dict, metrics: dict):
+def _validate_flexible_sql(tree: exp.Select, catalog: dict, physical: dict, metrics: dict, *, restore_saved_aliases=False):
     if any(isinstance(expression, exp.Star) for expression in tree.expressions):
         raise SqlCorrection("请写出明确的结果列")
-    tree = _validate_order_semantics(tree, catalog, physical, metrics)
+    tree = _validate_order_semantics(tree, catalog, physical, metrics, restore_saved_aliases=restore_saved_aliases)
     _rewrite_status_literals(tree, catalog)
     _cap_limit(tree)
     columns = [expression.alias_or_name.lower() for expression in tree.expressions]
@@ -438,7 +438,9 @@ def _select_row_count(select: exp.Select, measures: dict[str, _ScopeMeasures]) -
     return _RowCount(source.metric, key)
 
 
-def _validate_order_semantics(tree: exp.Select, catalog: dict, physical: dict, metrics: dict) -> exp.Select:
+def _validate_order_semantics(
+    tree: exp.Select, catalog: dict, physical: dict, metrics: dict, *, restore_saved_aliases=False,
+) -> exp.Select:
     tree = _qualify_authorized_fields(tree, physical)
     order_table = _order_table(catalog)["table"]
     fanouts = {item["table"]: item["key"] for item in catalog.get("fanouts", []) if item["anchor"] == order_table}
@@ -496,7 +498,15 @@ def _validate_order_semantics(tree: exp.Select, catalog: dict, physical: dict, m
                     and metric != _MetricColumn(name, aggregated=True)):
                 raise SqlCorrection(f"指标 {name} 须使用已发布的聚合口径")
             if scope.is_root and metric == _MetricColumn("payment_rows", aggregated=True) and name != "payment_rows":
-                raise SqlCorrection("支付笔数请使用结果列别名 payment_rows")
+                if not restore_saved_aliases or "payment_rows" in names:
+                    raise SqlCorrection("支付笔数请使用结果列别名 payment_rows")
+                # Qualification leaves output alias references unqualified, including in ORDER BY.
+                for node in scope.walk():
+                    if isinstance(node, exp.Column) and not node.table and node.name.lower() == name.lower():
+                        node.set("this", exp.to_identifier("payment_rows"))
+                selection.set("alias", exp.to_identifier("payment_rows"))
+                name = "payment_rows"
+                names.append(name)
             if metric is not None:
                 output[name] = metric
         group_key = _single_group_column(select)
@@ -508,7 +518,7 @@ def _validate_order_semantics(tree: exp.Select, catalog: dict, physical: dict, m
     return tree
 
 
-def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
+def _validate_order_sql(sql: str, catalog: dict, today: date, joins=(), *, restore_saved_aliases=False):
     if not sql.strip():
         raise SqlCorrection("请提交一条 DuckDB SELECT")
     if len(sql) > 12000:
@@ -523,7 +533,7 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     physical = {item["table"]: item for item in catalog["physical_tables"]}
     metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
     if _needs_flexible_sql(tree, catalog):
-        return _validate_flexible_sql(tree, catalog, physical, metrics)
+        return _validate_flexible_sql(tree, catalog, physical, metrics, restore_saved_aliases=restore_saved_aliases)
     supported = {"expressions", "from", "joins", "where", "group", "order", "limit", "having"}
     if any(value and key not in supported for key, value in tree.args.items()):
         raise SqlRejected("订单查询只支持单表汇总或已授权的等值关联")
@@ -717,7 +727,7 @@ def _json_rows(rows):
 
 
 def prior_order_sql(sql: str, catalog: dict, today: date, *, shift=None, joins=()) -> str:
-    tree, _, dates = _validate_order_sql(sql, catalog, today, joins)
+    tree, _, dates = _validate_order_sql(sql, catalog, today, joins, restore_saved_aliases=True)
     if shift:
         for literal in dates:
             literal.set("this", shift(date.fromisoformat(literal.this)).isoformat())

@@ -7,7 +7,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from app.direct_sql import SqlCorrection, SqlRejected, execute_order_sql
+from app.direct_sql import SqlCorrection, SqlRejected, execute_order_sql, prior_order_sql
 from app.query import load_catalog, question_catalog
 from app.sql_prompt import authorized_joins
 
@@ -346,6 +346,23 @@ def test_payment_count_output_requires_published_alias(jaffle_shop_path: Path):
 def test_payment_rows_alias_requires_payment_count(jaffle_shop_path: Path):
     with pytest.raises(SqlCorrection, match="payment_rows"):
         _run(jaffle_shop_path, "SELECT SUM(amount) AS payment_rows FROM payments")
+
+
+def test_prior_payment_query_preserves_ordering_with_canonical_alias(jaffle_shop_path: Path):
+    sql = """
+        SELECT payment_method, COUNT(*) AS payment_count FROM payments
+        WHERE order_date BETWEEN DATE '2019-01-01' AND DATE '2019-01-31'
+        GROUP BY payment_method ORDER BY payment_count DESC LIMIT 1
+    """
+    shifted = prior_order_sql(
+        sql, load_catalog(ROOT, "orders"), TODAY, shift=lambda day: day.replace(year=day.year - 1),
+        joins=authorized_joins(ROOT),
+    )
+
+    result = _run(jaffle_shop_path, shifted)
+
+    assert result["columns"] == ["payment_method", "payment_rows"]
+    assert result["rows"] == [["credit_card", 15]]
 
 
 @pytest.mark.parametrize("sql", [
