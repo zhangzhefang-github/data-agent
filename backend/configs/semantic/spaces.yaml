@@ -13,6 +13,7 @@ spaces:
       - orders.order_date
       - orders.status
       - orders.customer_id
+      - payments.payment_method
     dataset_ids:
       - order_mart
       - customer_mart
@@ -29,6 +30,11 @@ spaces:
         已完成: completed
         退货中: return_pending
         已退货: returned
+      payments.payment_method:
+        信用卡: credit_card
+        优惠券: coupon
+        银行转账: bank_transfer
+        礼品卡: gift_card
     calendar:
       timezone: Asia/Shanghai
       fiscal_year_start_month: 1

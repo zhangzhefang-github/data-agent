@@ -357,13 +357,26 @@ def _collect_order_dates(tree: exp.Select) -> list[exp.Literal]:
     return dates
 
 
-def _rewrite_status_literals(tree: exp.Select, catalog: dict) -> None:
-    dimension = catalog.get("dimensions", {}).get("status")
-    if not dimension or not dimension.get("values"):
+def _dictionary_by_column(catalog: dict) -> dict[str, dict]:
+    found = {}
+    for dimension in catalog.get("dimensions", {}).values():
+        column = str(dimension.get("column", "")).lower()
+        if column and dimension.get("values"):
+            found.setdefault(column, dimension)
+    return found
+
+
+def _rewrite_dictionary_literals(tree: exp.Select, catalog: dict) -> None:
+    """把字典维度上的中文取值写成库里的字面量。订单状态和支付方式走同一条规则。"""
+    by_column = _dictionary_by_column(catalog)
+    if not by_column:
         return
     for node in tree.find_all(exp.EQ, exp.NEQ, exp.In):
         column = node.this
-        if not isinstance(column, exp.Column) or column.name.lower() != "status":
+        if not isinstance(column, exp.Column):
+            continue
+        dimension = by_column.get(column.name.lower())
+        if dimension is None:
             continue
         values = node.expressions if isinstance(node, exp.In) else [node.expression]
         for value in values:
@@ -372,7 +385,8 @@ def _rewrite_status_literals(tree: exp.Select, catalog: dict) -> None:
             try:
                 value.set("this", physical_value(dimension, value.this))
             except ValueError as exc:
-                raise SqlCorrection("订单状态须使用授权字典") from exc
+                name = dimension.get("name") or "维度取值"
+                raise SqlCorrection(f"{name}须使用授权字典") from exc
 
 
 def _cap_limit(tree: exp.Select) -> None:
@@ -407,12 +421,36 @@ def _validate_flexible_sql(tree: exp.Select, catalog: dict):
             raise SqlRejected("查询包含未授权的表")
         table.set("db", exp.to_identifier("main"))
     _reject_multiplied_order_measures(tree, ctes, fanouts, order_table)
-    _rewrite_status_literals(tree, catalog)
+    _rewrite_dictionary_literals(tree, catalog)
     _cap_limit(tree)
     columns = [expression.alias_or_name.lower() for expression in tree.expressions]
     if len(set(columns)) != len(columns):
         raise SqlCorrection("请使用唯一的结果列名")
     return tree, columns, _collect_order_dates(tree)
+
+
+def _published_metric(metric_id: str, item: dict) -> str:
+    synonyms = "、".join(item.get("synonyms") or [])
+    synonym_text = f"，同义词：{synonyms}" if synonyms else ""
+    return f"{metric_id}（{item['name']}，{item['expression']}{synonym_text}）"
+
+
+def _unauthorized_selection(selection, value, matching, matched_metrics, catalog_metrics) -> SqlRejected:
+    rendered = selection.sql(dialect="duckdb", comments=False)
+    if len(matching) > 1:
+        kind = "同时对上多条已发布指标：" + "、".join(matching)
+    elif isinstance(value, exp.Column):
+        kind = "不是已授权维度"
+    else:
+        kind = "对不上已发布指标"
+    matched_text = "、".join(matched_metrics) if matched_metrics else "无"
+    published = "、".join(_published_metric(metric_id, item) for metric_id, item in catalog_metrics.items())
+    return SqlRejected(
+        "查询包含未授权的指标或维度："
+        f"{rendered}。未命中种类：{kind}。"
+        f"已对上的指标：{matched_text}。"
+        f"已发布指标：{published}。"
+    )
 
 
 def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
@@ -463,7 +501,8 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
     def dimension_column(node, names) -> bool:
         return _dimension_column(node, names, qualifier, aliases, anchor, join_keys)
 
-    metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
+    metric_defs = catalog["metrics"]
+    metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in metric_defs.items()}
     columns = []
     grouped = []
     missing_aliases = []
@@ -480,7 +519,10 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=()):
             if len(matching) != 1:
                 if _counts_customer_identifier(value):
                     raise SqlCorrection("没有已发布的客户数。请从订单表按客户标识分组，并使用订单笔数。")
-                raise SqlRejected("查询包含未授权的指标或维度")
+                raise _unauthorized_selection(
+                    selection, value, matching,
+                    [name for name in columns if name in metrics], metric_defs,
+                )
             missing_aliases.append(matching[0])
         columns.append(name)
     if missing_aliases:
@@ -591,10 +633,13 @@ def execute_order_sql(path: Path, sql: str, catalog: dict, today: date, joins=()
             rows = _fetch(db, checked)
     except (duckdb.BinderException, duckdb.ConversionException, duckdb.ParserException) as exc:
         raise SqlCorrection("SQL 无法绑定字段或转换数据类型") from exc
-    status_names = {entry["value"]: entry["name"] for entry in catalog["dimensions"]["status"].get("values", [])}
+    labels = {
+        column: {entry["value"]: entry["name"] for entry in dimension["values"]}
+        for column, dimension in _dictionary_by_column(catalog).items()
+    }
     return {
         "columns": columns,
-        "rows": [[status_names.get(value, value) if name == "status" else value
+        "rows": [[labels.get(name, {}).get(value, value)
                   for name, value in zip(columns, row, strict=True)] for row in _json_rows(rows)],
         "sql": tree.sql(dialect="duckdb", pretty=True, comments=False),
         "source": "DuckDB",

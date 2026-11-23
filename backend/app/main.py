@@ -31,6 +31,7 @@ from app.semantic.retrieval import (
 from app.semantic.snapshot import build_orders_snapshot, validation_inputs
 from app.sql_prompt import authorized_tables, render_direct_sql_prompt, render_two_phase_prompt
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
+from app.query_progress import QueryProgress, describe_sql, describe_structured, merge_agent_events
 
 if os.getenv("OPENAI_TRACING_API_KEY"):
     set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
@@ -47,7 +48,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -98,8 +99,36 @@ def conversation_detail(conversation_id: str):
     return conversation
 
 
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str):
+    if conversations.get(CONVERSATIONS, conversation_id) is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    lock_dir = CONVERSATIONS.parent / ".conversation-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock = (lock_dir / conversation_id).open("a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        raise HTTPException(status_code=409, detail="该会话正在查询，请稍后再试")
+    try:
+        if not conversations.delete(CONVERSATIONS, conversation_id):
+            raise HTTPException(status_code=404, detail="会话不存在")
+    finally:
+        lock.close()
+    return {"id": conversation_id}
+
+
 def event(kind: str, payload: dict) -> str:
     return f"event: {kind}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _settle_progress(progress: QueryProgress, state: str) -> list[str]:
+    settled = []
+    for step in list(progress.steps):
+        if step["state"] == "active":
+            settled.append(event("progress", progress.record(step["id"], step["title"], state)))
+    return settled
 
 
 def last_year(day: date) -> date:
@@ -139,6 +168,7 @@ async def chat(request: ChatRequest):
         result_data = []
         query_data = []
         answer = []
+        progress = QueryProgress()
         context = conversation["last_query"] if conversation else None
         is_previous_period = bool(re.search(r"去年同期", request.message))
         source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
@@ -210,11 +240,20 @@ async def chat(request: ChatRequest):
             elif plan.time_range is None:
                 plan = plan.model_copy(update={"time_range": TimeRange(start=today.replace(month=1, day=1), end=today)})
             plan = normalize_query(plan, CATALOG)
+            span = plan.time_range
+            query_title = describe_structured(
+                plan.metrics, plan.dimensions,
+                span.start.isoformat() if span else None,
+                span.end.isoformat() if span else None,
+                CATALOG,
+            )
+            progress.publish("query-1", query_title, "active")
             data = execute_query(DATABASE, plan, today, CATALOG, source=source)
             if source.engine == "sqlite" and EXTERNAL_SQLITE_PATH:
                 data['source'] = 'SQLite ADS'
             result_data.append(data)
             query_data.append(plan.model_dump(mode="json"))
+            progress.publish("query-1", query_title, "done")
             return json.dumps(data, ensure_ascii=False)
 
         attempts = 0
@@ -243,6 +282,7 @@ async def chat(request: ChatRequest):
                             query_error = "已授权上下文补充次数已用尽"
                             raise SqlRejected(query_error)
                         coverage_attempts += 1
+                        progress.publish(f"context-{coverage_attempts}", "补充已授权的数据集", "done")
                         presentation = include_datasets(
                             snapshot.authorization, presentation, gap, snapshot.object_datasets,
                         )
@@ -253,26 +293,33 @@ async def chat(request: ChatRequest):
                             "remaining_coverage": MAX_CONTEXT_COVERAGE - coverage_attempts,
                         }, ensure_ascii=False)
                 attempts += 1
+                step_id = f"query-{attempts}"
+                query_title = describe_sql(candidate)
+                progress.publish(step_id, query_title, "active")
                 try:
                     data = await asyncio.to_thread(
                         execute_order_sql, Path(source.location), candidate, request_catalog, business_today, join_keys,
                     )
                 except SqlCorrection as exc:
                     logger.error("Direct SQL needs repair (%s): %s", exc, candidate)
+                    progress.publish(step_id, query_title, "error")
                     if attempts < 3 and not is_previous_period:
                         return json.dumps({"error": str(exc), "remaining_repairs": 3 - attempts}, ensure_ascii=False)
                     query_error = "SQL 修复后仍无法执行"
                     raise
                 except SqlRejected as exc:
                     logger.error("Direct SQL rejected (%s): %s", exc, candidate)
+                    progress.publish(step_id, query_title, "error")
                     query_error = str(exc)
                     raise
                 result_data.append(data)
                 query_data.append({"mode": "orders_duckdb", "sql": data["sql"]})
+                progress.publish(step_id, describe_sql(data["sql"]), "done")
                 return json.dumps(data, ensure_ascii=False)
 
         yield event("conversation", {"conversation_id": conversation_id})
         yield event("status", {"status": "running"})
+        yield event("progress", progress.record("understand", "理解问题", "active"))
         try:
             prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{request.message}"
             tools = [get_semantic_catalog, resolve_business_terms, execute_semantic_query]
@@ -342,27 +389,46 @@ async def chat(request: ChatRequest):
                 run_config=RunConfig(trace_include_sensitive_data=False, tracing_disabled=not bool(os.getenv("OPENAI_TRACING_API_KEY"))),
                 **run_options,
             )
-            async for item in run.stream_events():
+            async for kind, item in merge_agent_events(run.stream_events(), progress.queue):
+                if kind == "progress":
+                    if item["id"] != "understand" and progress.state_of("understand") == "active":
+                        yield event("progress", progress.record("understand", "理解问题", "done"))
+                    yield event("progress", item)
+                    continue
                 if item.type == "raw_response_event" and item.data.type == "response.output_text.delta":
+                    if progress.state_of("understand") == "active":
+                        yield event("progress", progress.record("understand", "理解问题", "done"))
+                    if progress.state_of("explain") is None:
+                        yield event("progress", progress.record("explain", "整理说明", "active"))
                     answer.append(item.data.delta)
                     yield event("text", {"delta": item.data.delta})
             if direct_sql and not result_data and attempts:
                 raise SqlCorrection("查询未返回已验证的结果")
+            if progress.state_of("explain") == "active":
+                yield event("progress", progress.record("explain", "整理说明", "done"))
+            for step in list(progress.steps):
+                if step["state"] == "active":
+                    yield event("progress", progress.record(step["id"], step["title"], "done"))
             if result_data:
                 yield event("result", result_data[-1])
             message_id = conversations.add_message(
                 CONVERSATIONS, conversation_id, "assistant", "".join(answer),
                 result_data[-1] if result_data else None, query_data[-1] if query_data else None,
+                list(progress.steps) or None,
             )
             yield event("message", {"id": message_id})
             yield event("done", {"status": "completed"})
         except asyncio.CancelledError:
             raise
         except SqlTimeout as exc:
+            for failed in _settle_progress(progress, "error"):
+                yield failed
             yield event("error", {"message": str(exc), "code": "query_timeout"})
             yield event("done", {"status": "failed"})
         except Exception as exc:
             logger.error("Agent request failed (%s)", type(exc).__name__)
+            for failed in _settle_progress(progress, "error"):
+                yield failed
             yield event("error", {"message": query_error or "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
             yield event("done", {"status": "failed"})
 

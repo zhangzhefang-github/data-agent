@@ -8,7 +8,7 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
     datasets = {dataset.id: dataset for dataset in context.sql.datasets}
     metrics = {}
     metric_input_aliases = {}
-    exposed_columns = set()
+    column_owners: list[tuple[str, str]] = []
     for metric in context.business.metrics:
         wire_id = _wire_metric_id(metric.id, context.business.metric_aliases)
         dataset = datasets[metric.source_dataset_id]
@@ -24,7 +24,7 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
         }
         metric_input_aliases[metric.id] = wire_id
         if metric.field_id:
-            exposed_columns.add(dataset.columns[metric.field_id])
+            column_owners.append((dataset.id, dataset.columns[metric.field_id]))
 
     dimensions = {}
     dimension_input_aliases = {}
@@ -45,14 +45,17 @@ def catalog_from_semantic_context(context: SemanticContext) -> dict:
                 for name, value in dimension.allowed_values.items()
             ]
         dimension_input_aliases[dimension.id] = wire_id
-        exposed_columns.add(column)
+        column_owners.append((dataset.id, column))
 
     if len(metrics) != len(context.business.metrics) or len(dimensions) != len(context.business.dimensions):
         raise ValueError("语义上下文存在重复的兼容 ID")
-    model_ids = {item["model"] for item in [*metrics.values(), *dimensions.values()]}
-    if len(model_ids) != 1:
+    # 指标决定订单表。支付方式这类维度可以落在另一张已授权的表上。
+    metric_models = {item["model"] for item in metrics.values()}
+    dimension_models = {item["model"] for item in dimensions.values()}
+    if len(metric_models) > 1 or (not metric_models and len(dimension_models) != 1):
         raise ValueError("当前 Query IR 只能消费一个语义数据集")
-    model = datasets[model_ids.pop()]
+    model = datasets[(metric_models or dimension_models).pop()]
+    exposed_columns = {column for owner, column in column_owners if owner == model.id}
     date_dimension = next((dimension for dimension in context.business.dimensions if dimension.is_time), None)
     return {
         "id": context.space_id,

@@ -7,7 +7,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from app.direct_sql import SqlCorrection, SqlRejected, execute_order_sql
+from app.direct_sql import SqlCorrection, SqlRejected, _validate_order_sql, execute_order_sql
 from app.query import load_catalog, question_catalog
 from app.sql_prompt import authorized_joins
 
@@ -40,6 +40,37 @@ def _run(path: Path, sql: str) -> dict:
 def _independent(path: Path, sql: str) -> list[list]:
     with duckdb.connect(str(path), read_only=True) as connection:
         return [list(row) for row in connection.execute(sql).fetchall()]
+
+
+def test_chinese_payment_method_literals_return_rows_in_the_reviewed_window(jaffle_shop_path: Path):
+    """用户按中文支付方式筛选时，应得到该区间的笔数和金额，而不是空结果。"""
+    result = _run(
+        jaffle_shop_path,
+        """
+        SELECT
+          payments.payment_method AS payment_method,
+          COUNT(*) AS payment_rows,
+          SUM(payments.amount) AS payment_amount
+        FROM main.payments AS payments
+        WHERE
+          payments.order_date BETWEEN CAST('2018-01-01' AS DATE) AND CAST('2018-04-09' AS DATE)
+          AND payments.payment_method IN ('信用卡', '优惠券', '银行转账', '礼品卡')
+        GROUP BY
+          payments.payment_method
+        ORDER BY
+          payment_amount DESC
+        LIMIT 500
+        """,
+    )
+
+    assert result["rows"] == [
+        ["信用卡", 55, 871.0],
+        ["银行转账", 33, 411.0],
+        ["礼品卡", 12, 205.0],
+        ["优惠券", 13, 185.0],
+    ]
+    assert "信用卡" not in result["sql"]
+    assert "credit_card" in result["sql"]
 
 
 def test_payment_question_catalog_includes_four_published_amounts():
@@ -296,10 +327,10 @@ def test_payment_method_cte_can_use_a_different_grouping(jaffle_shop_path: Path)
     result = _run(jaffle_shop_path, sql)
 
     assert result["rows"] == [
-        ["bank_transfer", 33, 411.0],
-        ["coupon", 13, 185.0],
-        ["credit_card", 55, 871.0],
-        ["gift_card", 12, 205.0],
+        ["银行转账", 33, 411.0],
+        ["优惠券", 13, 185.0],
+        ["信用卡", 55, 871.0],
+        ["礼品卡", 12, 205.0],
     ]
 
 
@@ -313,6 +344,23 @@ def test_bare_payment_join_does_not_execute_inflated_order_amount(jaffle_shop_pa
 
     with pytest.raises(SqlRejected, match="支付明细"):
         _run(jaffle_shop_path, sql)
+
+
+def test_unauthorized_average_names_the_expression_and_published_metrics():
+    sql = """
+        SELECT SUM(amount) AS order_amount, COUNT(*) AS order_rows,
+               SUM(amount) / COUNT(*) AS avg_order_amount
+        FROM orders
+    """
+    with pytest.raises(SqlRejected) as rejected:
+        _validate_order_sql(sql, load_catalog(ROOT, "orders"), TODAY, authorized_joins(ROOT))
+    message = str(rejected.value)
+    assert "avg_order_amount" in message
+    assert "SUM(amount) / COUNT(*)" in message
+    assert "未命中种类：对不上已发布指标" in message
+    assert "已对上的指标：order_amount、order_rows" in message
+    assert "order_amount（订单金额，SUM(amount)，同义词：金额）" in message
+    assert "order_rows（订单笔数，COUNT(*)，同义词：订单数、订单笔数）" in message
 
 
 def test_direct_sql_rejects_month_nps_and_payment_fanout(jaffle_shop_path: Path):

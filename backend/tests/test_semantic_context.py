@@ -107,6 +107,7 @@ def test_orders_context_without_matches_returns_the_authorized_catalog_in_stable
         "orders.order_date",
         "orders.status",
         "orders.customer_id",
+        "payments.payment_method",
     ]
 
 
@@ -178,6 +179,7 @@ def test_context_omits_dimensions_that_are_not_user_visible(tmp_path: Path):
         "orders.order_date",
         "orders.status",
         "orders.customer_id",
+        "payments.payment_method",
     ]
 
 

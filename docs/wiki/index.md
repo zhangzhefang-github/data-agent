@@ -12,6 +12,10 @@
 - [规范语义模型 Phase 1 验收](phase1-semantic-acceptance.md)：2026-11-21 晚间，`gpt-4.1-mini` 自己编写的七题 SQL 与真实订单库一致，未授权问法被拒绝。
 - [空间授权与语义上下文](space-authorization-context.md)：2026-11-21，在 `5600d5c` 的审计之后决定空间授权是硬边界，检索只缩小提示，校验仍用完整授权。
 
+## 工程
+
+- [问数过程](query-process.md)：2026-11-23，提问时展示理解问题、查询标题和整理说明。标题来自当次 SQL 或结构化查询，不另写过程说明。
+
 ## 产品对标
 
 - [Genie Chat mode 对标](genie-chat-mode-gap.md) 记录 2026-11-22 的产品差距和建议顺序。

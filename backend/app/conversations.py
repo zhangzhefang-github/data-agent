@@ -30,6 +30,9 @@ def connect(path: Path):
         );
     ''')
     with closing(db), db:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(messages)')}
+        if 'process' not in columns:
+            db.execute('ALTER TABLE messages ADD COLUMN process TEXT')
         yield db
 
 
@@ -38,6 +41,17 @@ def create(path: Path, title: str) -> str:
     with connect(path) as db:
         db.execute('INSERT INTO conversations (id, title) VALUES (?, ?)', (conversation_id, title[:80]))
     return conversation_id
+
+
+def delete(path: Path, conversation_id: str) -> bool:
+    with connect(path) as db:
+        row = db.execute('SELECT id FROM conversations WHERE id = ?', (conversation_id,)).fetchone()
+        if row is None:
+            return False
+        db.execute('DELETE FROM feedback WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', (conversation_id,))
+        db.execute('DELETE FROM messages WHERE conversation_id = ?', (conversation_id,))
+        db.execute('DELETE FROM conversations WHERE id = ?', (conversation_id,))
+    return True
 
 
 def list_conversations(path: Path) -> list[dict]:
@@ -52,21 +66,44 @@ def get(path: Path, conversation_id: str) -> dict | None:
         if row is None:
             return None
         messages = db.execute('''SELECT messages.id, messages.role, messages.content, messages.result,
-            messages.created_at, feedback.rating AS feedback FROM messages
+            messages.process, messages.created_at, feedback.rating AS feedback FROM messages
             LEFT JOIN feedback ON feedback.message_id = messages.id
             WHERE messages.conversation_id = ? ORDER BY messages.rowid''', (conversation_id,)).fetchall()
     return {
         'id': row['id'], 'title': row['title'], 'created_at': row['created_at'],
         'last_query': json.loads(row['last_query']) if row['last_query'] else None,
-        'messages': [{**dict(message), 'result': json.loads(message['result']) if message['result'] else None} for message in messages],
+        'messages': [_message_row(message) for message in messages],
     }
 
 
-def add_message(path: Path, conversation_id: str, role: str, content: str, result: dict | None = None, query: dict | None = None) -> str:
+def _message_row(message) -> dict:
+    item = dict(message)
+    item['result'] = json.loads(item['result']) if item['result'] else None
+    item['process'] = _load_process(item.get('process'))
+    return item
+
+
+def _load_process(raw: str | None):
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, list) else None
+
+
+def add_message(path: Path, conversation_id: str, role: str, content: str, result: dict | None = None, query: dict | None = None, process: list | None = None) -> str:
     message_id = str(uuid.uuid4())
     with connect(path) as db:
-        db.execute('INSERT INTO messages (id, conversation_id, role, content, result) VALUES (?, ?, ?, ?, ?)',
-                   (message_id, conversation_id, role, content, json.dumps(result, ensure_ascii=False) if result is not None else None))
+        db.execute(
+            'INSERT INTO messages (id, conversation_id, role, content, result, process) VALUES (?, ?, ?, ?, ?, ?)',
+            (
+                message_id, conversation_id, role, content,
+                json.dumps(result, ensure_ascii=False) if result is not None else None,
+                json.dumps(process, ensure_ascii=False) if process else None,
+            ),
+        )
         if query is not None:
             db.execute('UPDATE conversations SET last_query = ? WHERE id = ?', (json.dumps(query, ensure_ascii=False), conversation_id))
     return message_id

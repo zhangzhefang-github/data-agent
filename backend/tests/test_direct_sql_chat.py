@@ -496,6 +496,22 @@ def test_large_space_supplements_an_authorized_dataset_then_revalidates(order_ch
     assert events["done"]["status"] == "completed"
 
 
+def test_unauthorized_metric_reaches_the_chat_error(order_chat):
+    sql = (
+        "SELECT SUM(amount) AS order_amount, COUNT(*) AS order_rows, "
+        "SUM(amount) / COUNT(*) AS avg_order_amount FROM orders"
+    )
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [sql], "平均订单金额", check_prompt=False)
+    message = events["error"]["message"]
+    assert replies == []
+    assert events["done"]["status"] == "failed"
+    assert "avg_order_amount" in message
+    assert "已对上的指标：order_amount、order_rows" in message
+    assert "订单金额" in message
+    assert "订单笔数" in message
+
+
 def test_large_space_still_rejects_an_unauthorized_dataset(order_chat, monkeypatch):
     monkeypatch.setattr(main, "is_small_space", lambda context: False)
     payments = "SELECT COUNT(*) AS order_rows FROM orders JOIN stg_payments ON orders.order_id = stg_payments.order_id"

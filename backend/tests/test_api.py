@@ -46,6 +46,33 @@ def test_conversation_is_created_and_reopened(monkeypatch, tmp_path):
         assert client.get("/api/conversations").json()[0]["id"] == conversation_id
 
 
+def test_conversation_delete_removes_one_thread(monkeypatch, tmp_path):
+    import fcntl
+    from app import main
+
+    monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
+    target = main.conversations.create(main.CONVERSATIONS, "要清除")
+    message_id = main.conversations.add_message(main.CONVERSATIONS, target, "assistant", "结果")
+    main.conversations.add_message(main.CONVERSATIONS, target, "user", "问题")
+    main.conversations.save_feedback(main.CONVERSATIONS, message_id, "correct")
+    kept = main.conversations.create(main.CONVERSATIONS, "保留")
+    main.conversations.add_message(main.CONVERSATIONS, kept, "user", "另一条")
+    with TestClient(app) as client:
+        deleted = client.delete(f"/api/conversations/{target}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"id": target}
+        assert client.get(f"/api/conversations/{target}").status_code == 404
+        assert [item["id"] for item in client.get("/api/conversations").json()] == [kept]
+        assert client.delete(f"/api/conversations/{target}").status_code == 404
+        lock_dir = tmp_path / ".conversation-locks"
+        lock_dir.mkdir(exist_ok=True)
+        with (lock_dir / kept).open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            assert client.delete(f"/api/conversations/{kept}").status_code == 409
+    assert main.conversations.get(main.CONVERSATIONS, kept)["messages"][0]["content"] == "另一条"
+    assert main.conversations.save_feedback(main.CONVERSATIONS, message_id, "incorrect") is False
+
+
 def test_agent_receives_current_business_date(monkeypatch, tmp_path):
     from datetime import datetime
     from types import SimpleNamespace
@@ -162,6 +189,8 @@ def test_stream_reports_model_failure_without_exposing_exception(monkeypatch):
     assert "event: error" in response.text
     assert '"status": "failed"' in response.text
     assert "secret-value" not in response.text
+    assert '"title": "理解问题"' in response.text
+    assert '"state": "error"' in response.text
 
 
 def test_same_conversation_lock_is_shared_between_requests(monkeypatch, tmp_path):
@@ -290,3 +319,33 @@ def test_orders_space_normalizes_canonical_query_ids_before_saving_history(monke
     assert set(space["metrics"]) == {
         "order_amount", "order_rows", "credit_card_amount", "coupon_amount", "bank_transfer_amount", "gift_card_amount",
     }
+    assert any(step["title"] == "订单笔数，按订单状态" or "订单笔数" in step["title"] for step in detail["messages"][-1]["process"])
+
+
+def test_stream_keeps_analysis_steps_on_the_answer(monkeypatch, tmp_path):
+    import json
+    from types import SimpleNamespace
+    from app import main
+
+    monkeypatch.setattr(main, "CONVERSATIONS", tmp_path / "conversations.db")
+
+    class Reply:
+        async def stream_events(self):
+            yield SimpleNamespace(type="raw_response_event", data=SimpleNamespace(type="response.output_text.delta", delta="今年销售额已汇总"))
+
+    monkeypatch.setattr(main.Runner, "run_streamed", lambda *args, **kwargs: Reply())
+    with TestClient(app) as client:
+        response = client.post("/api/chat/stream", json={"message": "查询今年销售额"})
+        assert response.status_code == 200
+        progress = [
+            json.loads(part.split("data: ", 1)[1])
+            for part in response.text.split("\n\n")
+            if part.startswith("event: progress")
+        ]
+        conversation_id = json.loads(next(part for part in response.text.split("\n\n") if part.startswith("event: conversation")).split("data: ", 1)[1])["conversation_id"]
+        stored = client.get(f"/api/conversations/{conversation_id}").json()["messages"][-1]["process"]
+    titles = [step["title"] for step in progress]
+    assert titles[0] == "理解问题"
+    assert "整理说明" in titles
+    assert stored[-1] == {"id": "explain", "title": "整理说明", "state": "done"}
+    assert all(step["state"] == "done" for step in stored)
