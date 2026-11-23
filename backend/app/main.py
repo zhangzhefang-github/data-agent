@@ -332,6 +332,27 @@ async def chat(request: ChatRequest):
                         saved_sql, request_catalog, business_today,
                         shift=last_year if is_previous_period else None, joins=join_keys,
                     )
+                if is_previous_period and previous_sql:
+                    # 服务已根据最近成功查询确定同期 SQL；不能再由模型决定是否执行。
+                    data = await asyncio.to_thread(
+                        execute_order_sql, Path(source.location), previous_sql, request_catalog, business_today, join_keys,
+                    )
+                    dates = list(dict.fromkeys(re.findall(r"\d{4}-\d{2}-\d{2}", data["sql"])))
+                    period = " 至 ".join(dates)
+                    message = (f"去年同期（{period}）" if period else "去年同期") + (
+                        "查询完成。" if data["rows"] else "没有可对比的订单。"
+                    )
+                    yield event("text", {"delta": message})
+                    yield event("result", data)
+                    outcome = {"status": "success", "reason": "查询完成"}
+                    message_id = conversations.add_message(
+                        CONVERSATIONS, conversation_id, "assistant", message, data,
+                        {"mode": "orders_duckdb", "sql": data["sql"]}, outcome=outcome,
+                    )
+                    saved = True
+                    yield event("message", {"id": message_id})
+                    yield event("done", {"status": "completed", "outcome": outcome})
+                    return
                 if is_small_space(snapshot.authorization):
                     presentation = snapshot.authorization
                 else:
@@ -417,6 +438,8 @@ async def chat(request: ChatRequest):
             logger.error("Agent request failed (%s)", type(exc).__name__)
             if terminal:
                 outcome = terminal
+            elif isinstance(exc, SqlRejected):
+                outcome = {"status": "refused", "reason": str(exc)}
             elif isinstance(exc, SqlTimeout):
                 outcome = {"status": "timeout", "reason": str(exc)}
             elif isinstance(exc, SqlCorrection):

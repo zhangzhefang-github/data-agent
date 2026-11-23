@@ -674,3 +674,38 @@ def test_authorized_payment_preaggregation_and_multiple_payments(order_chat):
         second, _ = order_chat(client, [multiple], '先按订单汇总支付，查询支付笔数多于一的订单')
         assert second['done']['outcome']['status'] == 'success'
         assert second['result']['rows'] == [[1, 10.0, 2]]
+
+
+def test_prior_year_executes_without_model_confirmation_and_persists_empty_result(order_chat, monkeypatch):
+    from app.evaluation.runner import send
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, ["SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders WHERE order_date BETWEEN '2015-01-01' AND '2015-04-09'"])
+        cid = first['conversation']['conversation_id']
+        def model_must_not_run(*args, **kwargs):
+            raise AssertionError('prior-year query needs no model confirmation')
+        monkeypatch.setattr(main.Runner, 'run_streamed', model_must_not_run)
+        followup = send(client, '去年同期', cid)
+        assert followup['outcome']['status'] == 'success'
+        assert followup['result']['rows'] == []
+        assert '2014-01-01' in followup['result']['sql']
+        assert '2014-04-09' in followup['result']['sql']
+        assert '2014-01-01' in followup['text'] and '没有' in followup['text']
+        history = client.get('/api/conversations/' + cid).json()
+        assert history['messages'][-1]['outcome'] == followup['outcome']
+        assert history['messages'][-1]['result'] == followup['result']
+
+
+def test_prior_year_timeout_preserves_last_success(order_chat, monkeypatch):
+    from app.evaluation.runner import send
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        cid = first['conversation']['conversation_id']
+        before = client.get('/api/conversations/' + cid).json()['last_query']
+        def timeout(*args, **kwargs):
+            raise main.SqlTimeout('订单查询超时')
+        monkeypatch.setattr(main, 'execute_order_sql', timeout)
+        response = send(client, '去年同期', cid)
+        assert response['outcome']['status'] == 'timeout'
+        history = client.get('/api/conversations/' + cid).json()
+        assert history['last_query'] == before
+        assert history['messages'][-1]['outcome'] == response['outcome']
