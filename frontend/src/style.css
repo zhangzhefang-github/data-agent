@@ -28,6 +28,12 @@ body { margin: 0; color: #243044; font-family: Inter, "Microsoft Yahei", sans-se
 .ask textarea { resize: none; }
 .ant-card, .ant-table-wrapper, .ant-table { width: 100%; }
 pre { white-space: pre-wrap; background: #f5f7fa; padding: 14px; }
+.sql { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; line-height: 1.6; color: #24292e; }
+.sql-keyword { color: #0000ff; }
+.sql-function { color: #795e26; }
+.sql-string { color: #a31515; }
+.sql-number { color: #098658; }
+.sql-comment { color: #008000; }
 summary { cursor: pointer; margin-top: 16px; }
 .history-title { color: #9aafbd; margin: 22px 0 8px; font-size: 12px; }
 .history-item { display: block; width: 100%; color: #d8e2e8; text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }

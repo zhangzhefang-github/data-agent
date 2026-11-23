@@ -13,7 +13,11 @@ from sqlglot.errors import OptimizeError, ParseError
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, traverse_scope
 
+from app.order_clarification import UNPUBLISHED_AVERAGE, UNPUBLISHED_SHARE
 from app.query import physical_value
+
+_AVERAGE_REPAIR = "平均订单金额尚未发布。请去掉这一列，只保留已授权的订单笔数、订单金额和维度后重新提交。"
+_SHARE_REPAIR = "订单占比尚未发布。请去掉占比列，只保留已授权的订单笔数、订单金额和维度后重新提交。"
 
 MAX_ROWS = 500
 QUERY_TIMEOUT = 5
@@ -250,13 +254,26 @@ def _collect_order_dates(tree: exp.Select) -> list[exp.Literal]:
     return dates
 
 
-def _rewrite_status_literals(tree: exp.Select, catalog: dict) -> None:
-    dimension = catalog.get("dimensions", {}).get("status")
-    if not dimension or not dimension.get("values"):
+def _dictionary_by_column(catalog: dict) -> dict[str, dict]:
+    found = {}
+    for dimension in catalog.get("dimensions", {}).values():
+        column = str(dimension.get("column", "")).lower()
+        if column and dimension.get("values"):
+            found.setdefault(column, dimension)
+    return found
+
+
+def _rewrite_dictionary_literals(tree: exp.Select, catalog: dict) -> None:
+    """按空间字典把中文取值写成库存字面量。订单状态和支付方式读同一份授权。"""
+    by_column = _dictionary_by_column(catalog)
+    if not by_column:
         return
     for node in tree.find_all(exp.EQ, exp.NEQ, exp.In):
         column = node.this
-        if not isinstance(column, exp.Column) or column.name.lower() != "status":
+        if not isinstance(column, exp.Column):
+            continue
+        dimension = by_column.get(column.name.lower())
+        if dimension is None:
             continue
         values = node.expressions if isinstance(node, exp.In) else [node.expression]
         for value in values:
@@ -265,7 +282,8 @@ def _rewrite_status_literals(tree: exp.Select, catalog: dict) -> None:
             try:
                 value.set("this", physical_value(dimension, value.this))
             except ValueError as exc:
-                raise SqlCorrection("订单状态须使用授权字典") from exc
+                name = dimension.get("name") or "维度取值"
+                raise SqlCorrection(f"{name}须使用授权字典") from exc
 
 
 def _cap_limit(tree: exp.Select) -> None:
@@ -280,6 +298,18 @@ def _cap_limit(tree: exp.Select) -> None:
     tree.set("limit", exp.Limit(expression=exp.Literal.number(cap)))
 
 
+def _union_all_branches(node) -> list[exp.Select] | None:
+    """一条 UNION ALL 仍是一条只读语句。去重 UNION、EXCEPT、INTERSECT 不在这里放行。"""
+    if isinstance(node, exp.Select):
+        return [node]
+    if type(node) is exp.Union and node.args.get("distinct") is False:
+        left = _union_all_branches(node.this)
+        right = _union_all_branches(node.expression)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
 def _qualify_authorized_fields(tree: exp.Select, physical: dict) -> exp.Select:
     checked = tree.copy()
     schema = {
@@ -287,6 +317,8 @@ def _qualify_authorized_fields(tree: exp.Select, physical: dict) -> exp.Select:
     }
     try:
         for scope in traverse_scope(checked):
+            if isinstance(scope.expression, exp.Union):
+                continue
             if not isinstance(scope.expression, exp.Select):
                 raise SqlRejected("子查询只写 SELECT")
             for table in scope.tables:
@@ -304,6 +336,8 @@ def _qualify_authorized_fields(tree: exp.Select, physical: dict) -> exp.Select:
 
     # SQLGlot 允许部分 HAVING 和 QUALIFY 引用保持未限定；只接受已验证的输出别名。
     for scope in traverse_scope(checked):
+        if not isinstance(scope.expression, exp.Select):
+            continue
         outputs = set(scope.expression.named_selects)
         for node in scope.walk():
             if isinstance(node, exp.Star) and not _is_count_star(node):
@@ -317,13 +351,138 @@ def _is_count_star(node: exp.Star) -> bool:
     return isinstance(node.parent, exp.Count) and not any(node.args.values())
 
 
+def _is_order_amount_column(node) -> bool:
+    if not isinstance(node, exp.Column) or node.name.lower() != "amount":
+        return False
+    # 支付明细上的 amount 不是订单金额，不能把它说成未发布的平均订单金额。
+    return (node.table or "").lower() not in {"payments", "p", "paid"}
+
+
+def _unpublished_order_average(node) -> bool:
+    value = node.this if isinstance(node, exp.Alias) else node
+    if isinstance(value, exp.Avg):
+        return _is_order_amount_column(value.this)
+    dividend = value.this if isinstance(value, exp.Div) else None
+    divisor = value.expression if isinstance(value, exp.Div) else None
+    return (
+        isinstance(dividend, exp.Sum)
+        and isinstance(divisor, exp.Count)
+        and _is_order_amount_column(dividend.this)
+        and isinstance(divisor.this, exp.Star)
+    )
+
+
+_PAYMENT_METHOD_REPAIR = (
+    "不要用 CASE 拆支付方式。按 payment_method 分组，"
+    "支付笔数写成 COUNT(*) AS payment_rows，支付金额写成 SUM(amount) AS payment_amount。"
+    "支付方式取值是 credit_card、coupon、bank_transfer、gift_card。"
+)
+
+
+def _payment_method_case(node) -> bool:
+    return any(
+        isinstance(column, exp.Column) and column.name.lower() == "payment_method"
+        for case in node.find_all(exp.Case)
+        for column in case.find_all(exp.Column)
+    )
+
+
+def _raise_for_unpublished_average(node, selections) -> None:
+    """未发布的平均订单金额可以指出并修复；旁边已有授权指标时不要整句丢掉。"""
+    if not _unpublished_order_average(node):
+        return
+    has_authorized_metric = any(
+        isinstance(item.unalias(), (exp.Sum, exp.Count))
+        for item in selections
+        if item is not node and not _unpublished_order_average(item)
+    )
+    if has_authorized_metric:
+        raise SqlCorrection(_AVERAGE_REPAIR)
+    raise SqlRejected(UNPUBLISHED_AVERAGE)
+
+
+def _is_share_term(node, column_ok, aggregate_ok) -> bool:
+    if isinstance(node, exp.Paren):
+        return _is_share_term(node.this, column_ok, aggregate_ok)
+    if isinstance(node, exp.Literal):
+        return True
+    if isinstance(node, exp.Column):
+        return column_ok(node)
+    if isinstance(node, (exp.Count, exp.Sum)):
+        return aggregate_ok(node)
+    if isinstance(node, (exp.Mul, exp.Div)):
+        return _is_share_term(node.this, column_ok, aggregate_ok) and _is_share_term(node.expression, column_ok, aggregate_ok)
+    return False
+
+
+def _share_uses_metric(node, column_ok, aggregate_ok) -> bool:
+    return any(
+        isinstance(item, exp.Column) and column_ok(item) or isinstance(item, (exp.Count, exp.Sum)) and aggregate_ok(item)
+        for item in node.walk()
+    )
+
+
+def _is_unpublished_share(node, column_ok, aggregate_ok) -> bool:
+    """已汇总的授权指标相除，含分母为零时的 CASE。不是已发布口径，也不能当成任意除法放行。"""
+    value = node.unalias() if isinstance(node, exp.Expression) else node
+    if _unpublished_order_average(value):
+        return False
+    if isinstance(value, exp.Div):
+        return _is_share_term(value, column_ok, aggregate_ok) and _share_uses_metric(value, column_ok, aggregate_ok)
+    if not isinstance(value, exp.Case) or value.this is not None:
+        return False
+    branches = []
+    for item in value.args.get("ifs") or []:
+        condition = item.this
+        if not isinstance(item, exp.If) or not isinstance(condition, COMPARISONS):
+            return False
+        if not _is_share_term(condition.this, column_ok, aggregate_ok) or not _is_share_term(condition.expression, column_ok, aggregate_ok):
+            return False
+        branches.append(item.args.get("true"))
+    if value.args.get("default") is not None:
+        branches.append(value.args.get("default"))
+    if not branches or any(branch is None or not _is_share_term(branch, column_ok, aggregate_ok) for branch in branches):
+        return False
+    return any(isinstance(item, exp.Div) for branch in branches for item in branch.walk()) and any(
+        _share_uses_metric(branch, column_ok, aggregate_ok) for branch in branches
+    )
+
+
+def _raise_for_unpublished_share(node, has_neighbor: bool, column_ok, aggregate_ok) -> None:
+    if not _is_unpublished_share(node, column_ok, aggregate_ok):
+        return
+    if has_neighbor:
+        raise SqlCorrection(_SHARE_REPAIR)
+    raise SqlRejected(UNPUBLISHED_SHARE)
+
+
+def _aggregated_metric_column(column, measures) -> bool:
+    found = _column_metric(column, measures)
+    return found is not None and found.aggregated
+
+
+def _has_aggregated_neighbor(selection, selections, measures) -> bool:
+    for item in selections:
+        if item is selection:
+            continue
+        value = item.unalias()
+        if isinstance(value, (exp.Sum, exp.Count)) and _aggregate_metric(value, measures) is not None:
+            return True
+        if isinstance(value, exp.Column) and _aggregated_metric_column(value, measures):
+            return True
+    return False
+
+
 def _validate_flexible_sql(tree: exp.Select, catalog: dict, physical: dict, metrics: dict, *, restore_saved_aliases=False):
-    if any(isinstance(expression, exp.Star) for expression in tree.expressions):
-        raise SqlCorrection("请写出明确的结果列")
+    branches = _union_all_branches(tree) or [tree]
+    for branch in branches:
+        if any(isinstance(expression, exp.Star) for expression in branch.expressions):
+            raise SqlCorrection("请写出明确的结果列")
     tree = _validate_order_semantics(tree, catalog, physical, metrics, restore_saved_aliases=restore_saved_aliases)
-    _rewrite_status_literals(tree, catalog)
+    branches = _union_all_branches(tree) or [tree]
+    _rewrite_dictionary_literals(tree, catalog)
     _cap_limit(tree)
-    columns = [expression.alias_or_name.lower() for expression in tree.expressions]
+    columns = [expression.alias_or_name.lower() for expression in branches[0].expressions]
     return tree, columns, _collect_order_dates(tree)
 
 
@@ -419,6 +578,62 @@ def _joins_preserve_rows(select: exp.Select, base: str, measures: dict[str, _Sco
     return True
 
 
+def _joined_on_unique_key(predicate, table: str, unique_key: str | None, other_table: str) -> bool:
+    if not isinstance(predicate, exp.EQ) or not unique_key:
+        return False
+    pairs = ((predicate.this, predicate.expression), (predicate.expression, predicate.this))
+    return any(
+        isinstance(key, exp.Column) and key.table.lower() == table and key.name.lower() == unique_key.lower()
+        and isinstance(other, exp.Column) and other.table.lower() == other_table
+        for key, other in pairs
+    )
+
+
+def _payment_rows_preserved(select: exp.Select, measures: dict[str, _ScopeMeasures]) -> bool:
+    """支付明细连接订单后，只要另一侧用自己的唯一键，支付行就不会被复制。"""
+    payment_aliases = [
+        alias for alias, source in measures.items()
+        if source.payment_fanout and source.row_count is not None and source.row_count.metric == "payment_rows"
+    ]
+    if len(payment_aliases) != 1:
+        return False
+    payment = payment_aliases[0]
+    source = select.args.get("from")
+    if source is None:
+        return False
+    known = {source.this.alias_or_name.lower()}
+    for join in select.args.get("joins") or ():
+        if join.kind not in {"", "INNER", "OUTER"} or join.side not in {"", "LEFT"}:
+            return False
+        alias = join.this.alias_or_name.lower()
+        # 左连接的右侧如果是支付明细，没有支付的订单也会占一行，行数不再是支付笔数。
+        if join.side == "LEFT" and alias == payment:
+            return False
+        target = measures.get(alias)
+        on = join.args.get("on")
+        if target is None or on is None or isinstance(on, exp.Or):
+            return False
+        predicates = on.flatten() if isinstance(on, exp.And) else (on,)
+        if alias == payment:
+            # 支付明细接进来时，已经在查询里的表必须用自己的唯一键，否则支付行会被放大。
+            preserved = any(
+                _joined_on_unique_key(predicate, other, measures[other].unique_key, alias)
+                for predicate in predicates
+                for other in known
+                if measures.get(other) and measures[other].unique_key
+            )
+        else:
+            preserved = any(
+                _joined_on_unique_key(predicate, alias, target.unique_key, other)
+                for predicate in predicates
+                for other in known
+            )
+        if not preserved:
+            return False
+        known.add(alias)
+    return payment in known and set(measures) <= known
+
+
 def _select_row_count(select: exp.Select, measures: dict[str, _ScopeMeasures]) -> _RowCount | None:
     counted = [(alias, source.row_count) for alias, source in measures.items() if source.row_count is not None]
     if len(counted) != 1:
@@ -448,7 +663,10 @@ def _validate_order_semantics(
     physical_measures = _dataset_measures(catalog, physical, metrics, order_table, fanouts)
     measures_by_select = {}
     payment_order_keys = set(fanouts.values())
+    output_selects = {id(branch) for branch in (_union_all_branches(tree) or [])}
     for scope in traverse_scope(tree):
+        if not isinstance(scope.expression, exp.Select):
+            continue
         measures = {
             alias: measures_by_select[id(source.expression)] if isinstance(source, Scope) else physical_measures[source.name.lower()]
             for alias, (_, source) in scope.selected_sources.items()
@@ -464,9 +682,17 @@ def _validate_order_semantics(
             if not isinstance(node, exp.AggFunc):
                 continue
             if multiplies and reads_orders and isinstance(node, exp.Count) and isinstance(node.this, exp.Star):
-                raise SqlRejected(_FANOUT_MESSAGE)
+                # 连接没有复制支付行时，COUNT(*) 是支付笔数。写成订单笔数，或连接键对不上唯一键，仍然拒绝。
+                alias = node.parent.alias if isinstance(node.parent, exp.Alias) else None
+                if not _payment_rows_preserved(select, measures) or (alias and alias.lower() in order_metrics):
+                    raise SqlRejected(_FANOUT_MESSAGE)
+                aggregates[node] = _MetricColumn("payment_rows", aggregated=True)
+                continue
             metric = _aggregate_metric(node, measures)
             if metric is None:
+                if _payment_method_case(node):
+                    raise SqlCorrection(_PAYMENT_METHOD_REPAIR)
+                _raise_for_unpublished_average(node, select.selects)
                 raise SqlRejected("查询包含未授权的指标或维度")
             if multiplies and isinstance(node, exp.Sum) and metric in order_metrics:
                 raise SqlRejected(_FANOUT_MESSAGE)
@@ -492,12 +718,28 @@ def _validate_order_semantics(
                 if metric is None or not metric.aggregated:
                     raise SqlRejected("标量子查询须返回一个已授权的汇总值")
             else:
+                if _payment_method_case(selection):
+                    raise SqlCorrection(_PAYMENT_METHOD_REPAIR)
+                _raise_for_unpublished_average(selection, select.selects)
+                _raise_for_unpublished_share(
+                    selection,
+                    _has_aggregated_neighbor(selection, select.selects, measures),
+                    lambda column: _aggregated_metric_column(column, measures),
+                    lambda aggregate: _aggregate_metric(aggregate, measures) is not None,
+                )
                 raise SqlRejected("查询包含未授权的指标或维度")
             name = selection.alias_or_name
-            if (scope.is_root and (name in metrics or name == "payment_rows")
-                    and metric != _MetricColumn(name, aggregated=True)):
+            is_output = id(select) in output_selects
+            recognized_payment = isinstance(metric, _MetricColumn) and metric.metric in {"payment_rows", "payment_amount"}
+            if is_output and name == "payment_rows" and metric != _MetricColumn("payment_rows", aggregated=True):
+                raise SqlCorrection("指标 payment_rows 须使用已发布的聚合口径")
+            if (is_output and (name in metrics or name == "payment_rows")
+                    and metric != _MetricColumn(name, aggregated=True)
+                    and not recognized_payment):
                 raise SqlCorrection(f"指标 {name} 须使用已发布的聚合口径")
-            if scope.is_root and metric == _MetricColumn("payment_rows", aggregated=True) and name != "payment_rows":
+            if is_output and metric == _MetricColumn("payment_amount", aggregated=True) and name != "payment_amount":
+                raise SqlCorrection("支付金额请使用结果列别名 payment_amount，不要写成订单金额")
+            if is_output and metric == _MetricColumn("payment_rows", aggregated=True) and name != "payment_rows":
                 if not restore_saved_aliases or "payment_rows" in names:
                     raise SqlCorrection("支付笔数请使用结果列别名 payment_rows")
                 # Qualification leaves output alias references unqualified, including in ORDER BY.
@@ -527,12 +769,12 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=(), *, resto
         statements = parse(sql, read="duckdb")
     except ParseError as exc:
         raise SqlCorrection("DuckDB SQL 语法错误") from exc
-    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
+    if len(statements) != 1 or _union_all_branches(statements[0]) is None:
         raise SqlRejected("只允许单条 SELECT 查询")
     tree = statements[0]
     physical = {item["table"]: item for item in catalog["physical_tables"]}
     metrics = {name: parse_one(metric["expression"], read="duckdb") for name, metric in catalog["metrics"].items()}
-    if _needs_flexible_sql(tree, catalog):
+    if isinstance(tree, exp.Union) or _needs_flexible_sql(tree, catalog):
         return _validate_flexible_sql(tree, catalog, physical, metrics, restore_saved_aliases=restore_saved_aliases)
     supported = {"expressions", "from", "joins", "where", "group", "order", "limit", "having"}
     if any(value and key not in supported for key, value in tree.args.items()):
@@ -585,6 +827,20 @@ def _validate_order_sql(sql: str, catalog: dict, today: date, joins=(), *, resto
             if len(matching) != 1:
                 if _counts_customer_identifier(value):
                     raise SqlCorrection("没有已发布的客户数。请从订单表按客户标识分组，并使用订单笔数。")
+                _raise_for_unpublished_average(selection, tree.expressions)
+                _raise_for_unpublished_share(
+                    selection,
+                    any(
+                        _matches_metric(item.unalias(), expression, qualifier, row_key)
+                        for item in tree.expressions
+                        if item is not selection
+                        for expression in metrics.values()
+                    ),
+                    lambda column: False,
+                    lambda aggregate: any(
+                        _matches_metric(aggregate, expression, qualifier, row_key) for expression in metrics.values()
+                    ),
+                )
                 raise SqlRejected("查询包含未授权的指标或维度")
             missing_aliases.append(matching[0])
         columns.append(name)
@@ -709,10 +965,13 @@ def execute_order_sql(path: Path, sql: str, catalog: dict, today: date, joins=()
             rows = _fetch(db, checked)
     except (duckdb.BinderException, duckdb.ConversionException, duckdb.ParserException) as exc:
         raise SqlCorrection("SQL 无法绑定字段或转换数据类型") from exc
-    status_names = {entry["value"]: entry["name"] for entry in catalog["dimensions"]["status"].get("values", [])}
+    labels = {
+        column: {entry["value"]: entry["name"] for entry in dimension["values"]}
+        for column, dimension in _dictionary_by_column(catalog).items()
+    }
     return {
         "columns": columns,
-        "rows": [[status_names.get(value, value) if name == "status" else value
+        "rows": [[labels.get(name, {}).get(value, value)
                   for name, value in zip(columns, row, strict=True)] for row in _json_rows(rows)],
         "sql": tree.sql(dialect="duckdb", pretty=True, comments=False),
         "source": "DuckDB",

@@ -365,7 +365,7 @@ def _context_dataset(
         if relationship.target_dataset_id == dataset.id:
             join_keys.update(relationship.target_fields)
     referenced.update(join_keys)
-    # 支付明细没有单独发布的筛选维度，连接和汇总仍要看到金额、方式和日期。
+    # 支付方式已发布为筛选维度。连接和汇总仍要看到金额和日期。
     if dataset.id == "payment_mart":
         referenced.update(field.id for field in dataset.fields if not field.sensitive)
     fields = {field.id: field for field in dataset.fields}

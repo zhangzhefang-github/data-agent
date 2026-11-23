@@ -205,6 +205,7 @@ dimensions:
   - {id: orders.order_date, name: 订单日期, source_dataset_id: order_mart, field_id: order_date, is_time: true, synonyms: [日期], user_visible: true}
   - {id: orders.status, name: 订单状态, source_dataset_id: order_mart, field_id: status, synonyms: [状态], user_visible: true}
   - {id: orders.customer_id, name: 客户标识, source_dataset_id: order_mart, field_id: customer_id, synonyms: [客户], user_visible: true}
+  - {id: payments.payment_method, name: 支付方式, source_dataset_id: payment_mart, field_id: payment_method, synonyms: [信用卡, 优惠券, 银行转账, 礼品卡], user_visible: true}
   - {id: customers.first_order, name: 首次订单日期, source_dataset_id: customer_mart, field_id: first_order}
   - {id: customers.most_recent_order, name: 最近订单日期, source_dataset_id: customer_mart, field_id: most_recent_order}
 metrics:

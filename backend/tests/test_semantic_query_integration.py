@@ -22,7 +22,16 @@ def test_orders_query_adapter_still_uses_the_current_order_mart_source():
     catalog = load_catalog(ROOT, "orders")
 
     assert {metric["model"] for metric in catalog["metrics"].values()} == {"order_mart"}
-    assert {dimension["model"] for dimension in catalog["dimensions"].values()} == {"order_mart"}
+    assert catalog["dimensions"]["payment_method"]["model"] == "payment_mart"
+    assert {
+        dimension_id: dimension["model"]
+        for dimension_id, dimension in catalog["dimensions"].items()
+        if dimension_id != "payment_method"
+    } == {
+        "order_date": "order_mart",
+        "status": "order_mart",
+        "customer_id": "order_mart",
+    }
 
 
 def test_order_question_totals_stay_unchanged_with_unconfirmed_mart_lineage(jaffle_shop_path: Path):
@@ -55,7 +64,13 @@ def test_orders_catalog_is_projected_from_the_published_semantic_model():
         "bank_transfer_amount",
         "gift_card_amount",
     }
-    assert set(catalog["dimensions"]) == {"order_date", "status", "customer_id"}
+    assert set(catalog["dimensions"]) == {"order_date", "status", "customer_id", "payment_method"}
+    assert catalog["dimensions"]["payment_method"]["values"] == [
+        {"name": "信用卡", "value": "credit_card"},
+        {"name": "优惠券", "value": "coupon"},
+        {"name": "银行转账", "value": "bank_transfer"},
+        {"name": "礼品卡", "value": "gift_card"},
+    ]
     assert catalog["metric_input_aliases"]["orders.order_count"] == "order_rows"
     assert catalog["dimensions"]["status"]["values"] == [
         {"name": "已下单", "value": "placed"},

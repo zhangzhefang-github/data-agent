@@ -42,6 +42,37 @@ def _independent(path: Path, sql: str) -> list[list]:
         return [list(row) for row in connection.execute(sql).fetchall()]
 
 
+def test_chinese_payment_method_literals_return_rows_in_the_reviewed_window(jaffle_shop_path: Path):
+    """中文支付方式筛选应改写成库存值，而不是返回空结果。"""
+    result = _run(
+        jaffle_shop_path,
+        """
+        SELECT
+          payments.payment_method AS payment_method,
+          COUNT(*) AS payment_rows,
+          SUM(payments.amount) AS payment_amount
+        FROM main.payments AS payments
+        WHERE
+          payments.payment_method IN ('信用卡', '优惠券', '银行转账', '礼品卡')
+          AND payments.order_date BETWEEN CAST('2018-01-01' AS DATE) AND CAST('2018-04-09' AS DATE)
+        GROUP BY
+          payments.payment_method
+        ORDER BY
+          payment_amount DESC
+        LIMIT 500
+        """,
+    )
+
+    assert result["rows"] == [
+        ["信用卡", 55, 871.0],
+        ["银行转账", 33, 411.0],
+        ["礼品卡", 12, 205.0],
+        ["优惠券", 13, 185.0],
+    ]
+    assert "信用卡" not in result["sql"]
+    assert "credit_card" in result["sql"]
+
+
 def test_payment_question_catalog_includes_four_published_amounts():
     catalog = question_catalog(ROOT, "orders", "分别统计四种支付金额")
 
@@ -329,8 +360,18 @@ def test_window_can_rank_customers_by_published_order_amount(jaffle_shop_path: P
 
 
 def test_payment_rows_cannot_be_returned_as_order_rows(jaffle_shop_path: Path):
-    with pytest.raises(SqlCorrection, match="已发布的聚合口径"):
+    with pytest.raises(SqlCorrection, match="payment_rows"):
         _run(jaffle_shop_path, "SELECT COUNT(*) AS order_rows FROM payments")
+
+
+def test_payment_method_case_can_be_repaired_into_a_group_by():
+    sql = """
+        SELECT
+          SUM(CASE WHEN payment_method = '信用卡' THEN amount ELSE 0 END) AS credit_card_amount
+        FROM payments
+    """
+    with pytest.raises(SqlCorrection, match="payment_method"):
+        _run(Path("/tmp/payment-method-case-not-executed.duckdb"), sql)
 
 
 def test_payment_count_output_requires_published_alias(jaffle_shop_path: Path):
@@ -341,6 +382,145 @@ def test_payment_count_output_requires_published_alias(jaffle_shop_path: Path):
             WITH paid AS (SELECT order_id, COUNT(*) AS payment_count FROM payments GROUP BY order_id)
             SELECT SUM(payment_count) AS payment_count FROM paid
         """)
+
+
+@pytest.mark.parametrize("sql", [
+    """
+    SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount, AVG(amount) AS avg_order_amount
+    FROM orders
+    WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = 'completed'
+    """,
+    """
+    SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount, AVG(amount) AS avg_order_amount
+    FROM orders GROUP BY status ORDER BY order_amount DESC
+    """,
+    "SELECT COUNT(*) AS order_rows, SUM(amount) / COUNT(*) AS avg_order_amount FROM orders",
+])
+def test_unpublished_average_keeps_authorized_metrics_repairable(sql: str):
+    with pytest.raises(SqlCorrection, match="平均订单金额尚未发布"):
+        _run(Path("/tmp/unpublished-average-not-executed.duckdb"), sql)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT AVG(amount) AS avg_order_amount FROM orders",
+    "SELECT SUM(amount) / COUNT(*) AS avg_order_amount FROM orders",
+])
+def test_unpublished_average_alone_names_the_metric(sql: str):
+    with pytest.raises(SqlRejected, match="平均订单金额尚未发布，不能返回结果"):
+        _run(Path("/tmp/unpublished-average-not-executed.duckdb"), sql)
+
+
+CUSTOMER_SHARE = """
+WITH orders_with_customer AS (
+  SELECT o.order_id, o.customer_id, o.amount
+  FROM main.orders AS o
+  JOIN main.customers AS c ON o.customer_id = c.customer_id
+  WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+),
+summary_with_customer AS (
+  SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders_with_customer
+),
+summary_all_orders AS (
+  SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+  FROM main.orders
+  WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+)
+SELECT
+  summary_with_customer.order_rows,
+  summary_with_customer.order_amount,
+  summary_all_orders.order_rows AS total_order_rows,
+  summary_all_orders.order_amount AS total_order_amount,
+  CASE WHEN summary_all_orders.order_rows = 0 THEN 0
+       ELSE summary_with_customer.order_rows * 1.0 / summary_all_orders.order_rows END AS order_rows_ratio,
+  CASE WHEN summary_all_orders.order_amount = 0 THEN 0
+       ELSE summary_with_customer.order_amount / summary_all_orders.order_amount END AS order_amount_ratio
+FROM summary_with_customer, summary_all_orders
+"""
+
+
+def test_customer_share_ratio_keeps_authorized_metrics_repairable():
+    with pytest.raises(SqlCorrection, match="订单占比尚未发布"):
+        _run(Path("/tmp/unpublished-share-not-executed.duckdb"), CUSTOMER_SHARE)
+
+
+def test_inline_share_ratio_keeps_authorized_metrics_repairable():
+    sql = """
+    SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount,
+           CASE WHEN COUNT(*) = 0 THEN 0 ELSE COUNT(*) * 1.0 / COUNT(*) END AS order_rows_ratio
+    FROM orders
+    """
+    with pytest.raises(SqlCorrection, match="订单占比尚未发布"):
+        _run(Path("/tmp/unpublished-share-not-executed.duckdb"), sql)
+
+
+def test_share_ratio_alone_names_the_metric():
+    with pytest.raises(SqlRejected, match="订单占比尚未发布，不能返回结果"):
+        _run(Path("/tmp/unpublished-share-not-executed.duckdb"), "SELECT COUNT(*) * 1.0 / COUNT(*) AS order_rows_ratio FROM orders")
+
+
+def test_non_ratio_case_stays_unauthorized():
+    sql = "SELECT CASE WHEN COUNT(*) = 0 THEN 0 ELSE 1 END AS flag, COUNT(*) AS order_rows FROM orders"
+    with pytest.raises(SqlRejected, match="未授权的指标或维度"):
+        _run(Path("/tmp/unpublished-share-not-executed.duckdb"), sql)
+
+
+def test_union_all_runs_as_one_readonly_query(tmp_path: Path):
+    path = tmp_path / "orders.duckdb"
+    with duckdb.connect(str(path)) as db:
+        db.execute("""
+            CREATE TABLE orders (
+                order_id INTEGER, order_date DATE, status VARCHAR, amount DOUBLE, customer_id INTEGER,
+                credit_card_amount DOUBLE, coupon_amount DOUBLE, bank_transfer_amount DOUBLE, gift_card_amount DOUBLE
+            )
+        """)
+        db.execute("CREATE TABLE customers (customer_id INTEGER)")
+        db.execute("""
+            CREATE TABLE payments (
+                order_id INTEGER, payment_method VARCHAR, amount DOUBLE, order_date DATE
+            )
+        """)
+        db.execute("""
+            INSERT INTO payments VALUES
+                (1, 'credit_card', 10, DATE '2018-01-02'),
+                (1, 'coupon', 4, DATE '2018-01-02'),
+                (2, 'bank_transfer', 7, DATE '2018-01-03')
+        """)
+    sql = """
+        SELECT payment_method, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount
+        FROM payments
+        GROUP BY payment_method
+        UNION ALL
+        SELECT payment_method, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount
+        FROM payments
+        WHERE payment_method = 'credit_card'
+        GROUP BY payment_method
+    """
+
+    result = _run(path, sql)
+
+    assert result["columns"] == ["payment_method", "payment_rows", "payment_amount"]
+    assert ["信用卡", 1, 10.0] in result["rows"]
+    assert len(result["rows"]) == 4
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT COUNT(*) AS order_rows FROM orders; SELECT COUNT(*) AS order_rows FROM orders",
+    "SELECT COUNT(*) AS order_rows FROM orders EXCEPT SELECT COUNT(*) AS order_rows FROM orders",
+    "SELECT COUNT(*) AS order_rows FROM orders UNION SELECT COUNT(*) AS order_rows FROM orders",
+])
+def test_only_union_all_joins_selects(sql: str):
+    with pytest.raises(SqlRejected, match="只允许单条 SELECT 查询"):
+        _run(Path("/tmp/union-gate-not-executed.duckdb"), sql)
+
+
+def test_union_all_still_rejects_an_unauthorized_branch():
+    sql = """
+        SELECT COUNT(*) AS order_rows FROM orders
+        UNION ALL
+        SELECT COUNT(*) FROM stg_payments
+    """
+    with pytest.raises(SqlRejected, match="未授权的表"):
+        _run(Path("/tmp/union-gate-not-executed.duckdb"), sql)
 
 
 def test_payment_rows_alias_requires_payment_count(jaffle_shop_path: Path):
@@ -362,7 +542,7 @@ def test_prior_payment_query_preserves_ordering_with_canonical_alias(jaffle_shop
     result = _run(jaffle_shop_path, shifted)
 
     assert result["columns"] == ["payment_method", "payment_rows"]
-    assert result["rows"] == [["credit_card", 15]]
+    assert result["rows"] == [["信用卡", 15]]
 
 
 @pytest.mark.parametrize("sql", [
@@ -399,11 +579,90 @@ def test_payment_method_cte_can_use_a_different_grouping(jaffle_shop_path: Path)
     result = _run(jaffle_shop_path, sql)
 
     assert result["rows"] == [
-        ["bank_transfer", 33, 411.0],
-        ["coupon", 13, 185.0],
-        ["credit_card", 55, 871.0],
-        ["gift_card", 12, 205.0],
+        ["银行转账", 33, 411.0],
+        ["优惠券", 13, 185.0],
+        ["信用卡", 55, 871.0],
+        ["礼品卡", 12, 205.0],
     ]
+
+
+def test_payment_count_joins_orders_for_customer_without_inflating_order_amount(jaffle_shop_path: Path):
+    """订单指标在订单表上汇总。支付笔数连接订单只为了取客户标识，不能被当成放大后的订单笔数。"""
+    sql = """
+        WITH orders_by_customer AS (
+            SELECT customer_id, COUNT(*) AS order_rows, SUM(amount) AS order_amount
+            FROM orders
+            WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+            GROUP BY customer_id
+        ),
+        payments_by_customer AS (
+            SELECT o.customer_id, p.payment_method,
+                   COUNT(*) AS payment_rows, SUM(p.amount) AS payment_amount
+            FROM orders AS o
+            JOIN payments AS p ON o.order_id = p.order_id
+            WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+            GROUP BY o.customer_id, p.payment_method
+        )
+        SELECT o.customer_id, o.order_rows, o.order_amount,
+               p.payment_method, p.payment_rows, p.payment_amount
+        FROM orders_by_customer AS o
+        LEFT JOIN payments_by_customer AS p ON o.customer_id = p.customer_id
+    """
+
+    result = _run(jaffle_shop_path, sql)
+
+    seen = {}
+    payment_rows = 0
+    payment_amount = 0.0
+    for customer_id, order_rows, order_amount, _method, rows, amount in result["rows"]:
+        assert seen.get(customer_id, (order_rows, order_amount)) == (order_rows, order_amount)
+        seen[customer_id] = (order_rows, order_amount)
+        payment_rows += rows or 0
+        payment_amount += amount or 0.0
+    assert sum(item[0] for item in seen.values()) == 99
+    assert sum(item[1] for item in seen.values()) == 1672.0
+    assert payment_rows == 113
+    assert payment_amount == 1672.0
+
+
+@pytest.mark.parametrize("sql", [
+    """
+    SELECT COUNT(*) AS payment_rows
+    FROM payments AS p
+    JOIN orders AS o ON p.order_id = o.customer_id
+    """,
+    """
+    SELECT COUNT(*) AS payment_rows
+    FROM orders AS o
+    LEFT JOIN payments AS p ON o.order_id = p.order_id
+    """,
+    """
+    SELECT COUNT(*) AS order_rows
+    FROM orders AS o
+    JOIN payments AS p ON o.order_id = p.order_id
+    """,
+])
+def test_payment_count_still_rejects_multiplied_or_mislabeled_rows(sql: str):
+    with pytest.raises(SqlRejected, match="支付明细"):
+        _run(Path("/tmp/payment-count-guard-not-executed.duckdb"), sql)
+
+
+def test_pivoted_payment_counts_are_repaired_instead_of_refused_as_fanout():
+    sql = """
+        WITH payment_summary AS (
+            SELECT o.customer_id, p.payment_method, COUNT(*) AS payment_count
+            FROM payments AS p
+            JOIN orders AS o ON p.order_id = o.order_id
+            GROUP BY o.customer_id, p.payment_method
+        )
+        SELECT customer_id,
+               SUM(CASE WHEN payment_method = 'credit_card' THEN payment_count ELSE 0 END) AS credit_card_count
+        FROM payment_summary
+        GROUP BY customer_id
+    """
+
+    with pytest.raises(SqlCorrection, match="payment_method"):
+        _run(Path("/tmp/payment-pivot-not-executed.duckdb"), sql)
 
 
 def test_bare_payment_join_does_not_execute_inflated_order_amount(jaffle_shop_path: Path):

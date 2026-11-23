@@ -1,10 +1,50 @@
 """Pre-query decisions for the orders space and replies to pending questions."""
 import re
 
+UNPUBLISHED_AVERAGE = "平均订单金额尚未发布，不能返回结果。"
+UNPUBLISHED_SHARE = "订单占比尚未发布，不能返回结果。"
+PRESENTATION_REPAIR = (
+    "排名指标、前若干名客户、客户标识和订单状态都已明确。"
+    "请直接提交按客户标识和订单状态统计订单笔数和订单金额的 SQL，"
+    "不要询问先展示客户列表还是展示分组。"
+)
+
+
+def mentions_unpublished_average(question: str) -> bool:
+    return "平均订单金额" in question or "平均金额" in question
+
+
+def mentions_unpublished_share(question: str) -> bool:
+    return "占比" in question or "比例" in question
+
+
+def mentions_authorized_order_metric(question: str) -> bool:
+    """去掉未发布的平均口径后，问题是否还在问已授权的订单笔数或订单金额。"""
+    remaining = question.replace("平均订单金额", "").replace("平均金额", "")
+    return any(token in remaining for token in ("订单笔数", "订单金额", "总笔数", "总金额"))
+
+
+def specified_customer_status_breakdown(question: str) -> bool:
+    """排名口径、名次、客户和订单状态都已写出，不再追问怎么展示。"""
+    return (
+        "订单金额" in question
+        and "最高" in question
+        and re.search(r"\d+\s*位", question) is not None
+        and "客户" in question
+        and "订单状态" in question
+        and "订单笔数" in question
+    )
+
+
+def is_presentation_choice(clarification: str) -> bool:
+    return "展示" in clarification and ("还是" in clarification or "或" in clarification)
+
 
 def decide(question: str, resolved: set[str] | None = None):
     resolved = resolved or set()
     q = question.lower()
+    if mentions_unpublished_average(question) and not mentions_authorized_order_metric(question):
+        return 'refused', UNPUBLISHED_AVERAGE, None
     if re.search(r'\bnps\b|净推荐值|净推荐分', q):
         return 'refused', '订单主题空间未发布 NPS，无法查询。', None
     if re.search(r'\b(?:stg|raw|internal)_[a-z0-9_]+\b|内部表|原始表', q):

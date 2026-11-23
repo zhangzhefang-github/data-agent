@@ -13,13 +13,14 @@ def test_orders_scope_projects_authorized_datasets_and_the_customer_join():
     text = render_query_scope(context)
 
     assert text.startswith("可查询的数据范围\n这是订单主题空间。")
-    assert "可以按订单日期、订单状态、客户标识筛选或分组" in text
+    assert "可以按订单日期、订单状态、客户标识、支付方式筛选或分组" in text
     assert "支付明细（payments）" in text
     assert "订单汇总（orders）" in text
     assert "可查询订单金额、订单笔数、信用卡金额、优惠券金额、银行转账金额、礼品卡金额" in text
     assert "不要再与 amount 相加" in text
     assert "每笔订单一笔，包含全部状态" in text
     assert "订单状态包括已下单、已发货、已完成、退货中、已退货" in text
+    assert "支付方式包括信用卡、优惠券、银行转账、礼品卡" in text
     assert "客户汇总（customers）。当前可关联的列是客户标识。" in text
     assert "关联可能放大行数" in text
     assert "订单汇总与客户汇总按客户标识等值内连接，多对一，不会放大行数。" in text
@@ -33,6 +34,11 @@ def test_orders_scope_projects_authorized_datasets_and_the_customer_join():
 def test_scope_question_recognizes_the_capability_ask_only():
     assert is_query_scope_question("  请问我能查询哪些信息？ ")
     assert is_query_scope_question("能查什么")
+    assert is_query_scope_question("我能查询什么？")
+    assert is_query_scope_question("我们查询什么？")
+    assert is_query_scope_question("可以查询什么")
     assert not is_query_scope_question("查询订单金额")
+    assert not is_query_scope_question("查询什么状态的订单")
+    assert not is_query_scope_question("各支付方式的支付笔数和支付金额是多少")
     assert not is_query_scope_question("每个客户有多少笔订单")
     assert not is_query_scope_question("去年同期呢")
