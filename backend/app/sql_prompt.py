@@ -138,8 +138,29 @@ def render_direct_sql_prompt(
         "指标表达式和结果别名必须与授权指标完全一致，不要相减或改写。"
         "已发布订单指标的基础粒度是单笔订单。"
         "支付明细要先按 order_id 汇总，再与订单连接。不要在未汇总的支付行上计算订单笔数或订单金额。"
+        + _payment_example(context)
     )
 
+
+
+def _payment_example(context: SemanticContext) -> str:
+    datasets = {item.physical_object.lower(): set(item.columns.values()) for item in context.sql.datasets}
+    metrics = {metric.id for metric in context.business.metrics}
+    if not ({"orders.order_amount", "orders.order_count"} <= metrics and
+            {"order_id", "amount"} <= datasets.get("orders", set()) and
+            {"order_id", "amount"} <= datasets.get("payments", set())):
+        return ""
+    return (
+        "\n支付预汇总示例（仅示范有匹配支付的订单；按实际问题决定连接和过滤条件）：\n"
+        "WITH paid AS (SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount "
+        "FROM payments GROUP BY order_id) "
+        "SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount, "
+        "SUM(paid.payment_rows) AS payment_rows, SUM(paid.payment_amount) AS payment_amount "
+        "FROM orders o JOIN paid ON paid.order_id = o.order_id;\n"
+        "要筛选多笔支付，在外层 WHERE 使用 paid.payment_rows > 1。"
+        "不要把 COUNT(*) 改成 COUNT(order_id)，不要用 SUM(COALESCE(...)) 改写指标；"
+        "订单日期条件写在订单表上，避免额外的订单汇总 CTE。"
+    )
 
 def _orders_context(root: Path):
     return build_semantic_context(
@@ -183,6 +204,7 @@ def render_two_phase_prompt(
         "指标表达式和结果别名必须与已展开指标完全一致。"
         "已展开的表可以连接。内连接会丢掉对端没有匹配的行。"
         "fanout_risk 为真时，先按订单汇总支付明细，再计算订单笔数和订单金额。"
+        + _payment_example(presentation)
     )
 
 

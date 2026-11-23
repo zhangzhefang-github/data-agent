@@ -128,6 +128,9 @@ def order_chat(monkeypatch, tmp_path):
             assert "不要再与 amount 相加" in prompt
             assert "基础粒度是单笔订单" in prompt
             assert "支付明细要先按 order_id 汇总" in prompt
+            assert "支付预汇总示例" in prompt
+            assert "COUNT(*) AS order_rows" in prompt
+            assert "SUM(paid.payment_rows) AS payment_rows" in prompt
             assert "main.payments" in authorized
             assert "stg_payments" not in prompt
             return Run()
@@ -650,3 +653,24 @@ def test_model_clarification_options_survive_history_and_resume(order_chat, monk
         assert second['done']['outcome']['status'] == 'success'
         assert replies
         assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
+
+
+def test_authorized_payment_preaggregation_and_multiple_payments(order_chat):
+    with duckdb.connect(main.DUCKDB_PATH) as db:
+        db.execute('UPDATE orders SET order_id = customer_id WHERE customer_id IN (14, 15)')
+        db.execute("INSERT INTO payments VALUES (14, 'credit_card', 4, DATE '2018-01-01'), (14, 'coupon', 6, DATE '2018-01-01'), (15, 'credit_card', 20, DATE '2018-02-01')")
+    base = '''WITH paid AS (SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount FROM payments GROUP BY order_id)
+      SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount, SUM(paid.payment_rows) AS payment_rows,
+      SUM(paid.payment_amount) AS payment_amount FROM orders o JOIN paid ON paid.order_id = o.order_id
+      WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-12-31' '''
+    multiple = '''WITH paid AS (SELECT order_id, COUNT(*) AS payment_rows FROM payments GROUP BY order_id)
+      SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount, SUM(paid.payment_rows) AS payment_rows
+      FROM orders o JOIN paid ON paid.order_id = o.order_id
+      WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-12-31' AND paid.payment_rows > 1'''
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [base], '先按订单汇总支付再查订单和支付金额')
+        assert first['done']['outcome']['status'] == 'success'
+        assert first['result']['rows'] == [[2, 30.0, 3, 30.0]]
+        second, _ = order_chat(client, [multiple], '先按订单汇总支付，查询支付笔数多于一的订单')
+        assert second['done']['outcome']['status'] == 'success'
+        assert second['result']['rows'] == [[1, 10.0, 2]]
