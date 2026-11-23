@@ -121,6 +121,9 @@ def order_chat(monkeypatch, tmp_path):
             assert "只回复下面这段原文" in prompt
             assert "可查询范围原文" in agent.instructions
             assert "本次执行 SQL" in agent.instructions
+            assert "问题条件和口径完整明确时立即执行" in agent.instructions
+            assert "不要要求补充可选的筛选、分组、输出列、排序或行数限制" in agent.instructions
+            assert "查询全部日期或状态" in agent.instructions
             assert "第一季度是 1–3 月" in prompt
             assert "不要再与 amount 相加" in prompt
             assert "基础粒度是单笔订单" in prompt
@@ -532,6 +535,8 @@ def test_clarification_outcome_overrides_partial_text_and_persists(order_chat, m
             args = json.dumps({'sql': '', 'clarification': '客户姓名不可查，请确认是否只查订单金额。'})
             context = ToolContext(None, tool_name=tool.name, tool_call_id='clarify', tool_arguments=args)
             await tool.on_invoke_tool(context, args)
+            if False:
+                yield None
 
     def runner(agent, prompt, **kwargs):
         nonlocal tool
@@ -593,4 +598,55 @@ def test_mixed_name_requires_confirmation_and_new_question_clears_pending(order_
         order_chat(client, [], '2018年最高的客户是谁', cid)
         result, _ = order_chat(client, [TOTALS], '订单总金额是多少', cid)
         assert result['done']['outcome']['status'] == 'success'
+        assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
+
+
+@pytest.mark.parametrize('question', ['支付方式', '按支付方式'])
+def test_short_independent_question_replaces_pending(order_chat, question):
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [], '2018年最高的客户是谁')
+        cid = first['conversation']['conversation_id']
+        result, replies = order_chat(client, [TOTALS], question, cid)
+        assert result['done']['outcome']['status'] == 'success'
+        assert replies
+        assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
+
+
+@pytest.mark.parametrize(('question', 'sql'), [
+    ('订单金额最高的客户', 'SELECT customer_id, SUM(amount) AS order_amount FROM orders GROUP BY customer_id ORDER BY order_amount DESC'),
+    ('订单笔数最高的客户', 'SELECT customer_id, COUNT(*) AS order_rows FROM orders GROUP BY customer_id ORDER BY order_rows DESC'),
+])
+def test_explicit_ranking_metric_does_not_require_clarification(order_chat, question, sql):
+    with TestClient(main.app) as client:
+        result, replies = order_chat(client, [sql], question)
+        assert result['done']['outcome']['status'] == 'success'
+        assert replies
+
+
+def test_model_clarification_options_survive_history_and_resume(order_chat, monkeypatch):
+    from app.evaluation.runner import send
+    class Run:
+        async def stream_events(self):
+            args = json.dumps({'sql': '', 'clarification': '请选择时间范围', 'options': ['2018年', '2017年']})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id='clarify', tool_arguments=args)
+            await tool.on_invoke_tool(context, args)
+            if False:
+                yield None
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = agent.tools[0]
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, 'run_streamed', runner)
+    with TestClient(main.app) as client:
+        first = send(client, '各订单状态的订单金额')
+        cid = first['conversation_id']
+        pending = client.get('/api/conversations/' + cid).json()['pending_clarification']
+        assert pending['question'] == '各订单状态的订单金额'
+        assert pending['options'] == ['2018年', '2017年']
+        second, replies = order_chat(client, [TOTALS], '2018年', cid)
+        assert second['done']['outcome']['status'] == 'success'
+        assert replies
         assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
