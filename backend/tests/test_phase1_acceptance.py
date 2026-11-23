@@ -343,6 +343,11 @@ def test_payment_count_output_requires_published_alias(jaffle_shop_path: Path):
         """)
 
 
+def test_payment_rows_alias_requires_payment_count(jaffle_shop_path: Path):
+    with pytest.raises(SqlCorrection, match="payment_rows"):
+        _run(jaffle_shop_path, "SELECT SUM(amount) AS payment_rows FROM payments")
+
+
 @pytest.mark.parametrize("sql", [
     "SELECT internal_note, COUNT(*) AS order_rows FROM orders GROUP BY internal_note",
     "WITH visible AS (SELECT order_id, internal_note FROM orders) SELECT internal_note FROM visible",
