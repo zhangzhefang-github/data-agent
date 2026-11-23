@@ -34,6 +34,11 @@ def test_orders_scope_projects_authorized_datasets_and_the_customer_join():
 def test_scope_question_recognizes_the_capability_ask_only():
     assert is_query_scope_question("  请问我能查询哪些信息？ ")
     assert is_query_scope_question("能查什么")
+    assert is_query_scope_question("我能查询什么？")
+    assert is_query_scope_question("我们查询什么？")
+    assert is_query_scope_question("可以查询什么")
     assert not is_query_scope_question("查询订单金额")
+    assert not is_query_scope_question("查询什么状态的订单")
+    assert not is_query_scope_question("各支付方式的支付笔数和支付金额是多少")
     assert not is_query_scope_question("每个客户有多少笔订单")
     assert not is_query_scope_question("去年同期呢")

@@ -20,6 +20,10 @@ _SCOPE_QUESTIONS = {
     "有哪些数据可以查",
     "能问什么",
 }
+# 「我能查询什么」「我们查询什么」这类说法不在固定清单里，但仍是能力问题。
+_SCOPE_PATTERN = re.compile(
+    r"^(?:我|你|我们|咱们)?(?:想)?(?:能|可以)?(?:查询|查)(?:哪些|什么)(?:信息|数据|内容)?$"
+)
 _CARDINALITY = {
     "many_to_one": "多对一",
     "one_to_many": "一对多",
@@ -31,11 +35,22 @@ _DATASET_ORDER = {"fact": 0, "dimension": 1}
 
 def is_query_scope_question(message: str) -> bool:
     """精确的能力问题走原文，不交给模型改写。"""
+    normalized = _normalize_scope_question(message)
+    return normalized in _SCOPE_QUESTIONS or _SCOPE_PATTERN.fullmatch(normalized) is not None
+
+
+def looks_like_scope_answer(text: str) -> bool:
+    """模型已经写出授权范围时，保留这段说明，不改成错误或内部指令。"""
+    stripped = text.strip()
+    return stripped.startswith("可查询的数据范围") or stripped.startswith("这是订单主题空间")
+
+
+def _normalize_scope_question(message: str) -> str:
     normalized = re.sub(r"\s+", "", message.strip()).strip("？?。.!！")
     for prefix in ("请问", "想问一下", "告诉我"):
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix):]
-    return normalized in _SCOPE_QUESTIONS
+    return normalized
 
 
 def render_query_scope(context: SemanticContext) -> str:
@@ -86,7 +101,8 @@ def _dataset_line(index: int, dataset: ContextDataset, context: SemanticContext)
             if dimension.allowed_values:
                 sentences.append(f"{dimension.name}包括{'、'.join(dimension.allowed_values)}")
     if not metrics and not dimensions:
-        columns = "、".join(_field_name(context, field_id) for field_id in dataset.columns)
+        # 列来自集合，显示顺序必须固定，否则同一范围说明每次不同。
+        columns = "、".join(sorted(_field_name(context, field_id) for field_id in dataset.columns))
         sentences.append(f"当前可关联的列是{columns}" if columns else "当前没有可直接筛选的列")
     return "。".join(part.strip("。") for part in sentences if part) + "。"
 

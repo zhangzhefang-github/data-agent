@@ -6,7 +6,13 @@ import 'antd/dist/reset.css'
 import './style.css'
 
 type Step = { id: string, title: string, state: 'active' | 'done' | 'error' }
-type Message = { id: string, role: string, content: string, result: Result | null, process?: Step[] | null, feedback?: Rating | null }
+type Outcome = { status: string, reason: string }
+
+function replyText(content: string, outcome?: Outcome | null) {
+  if (content.trim()) return content
+  return outcome?.reason ?? ''
+}
+type Message = { id: string, role: string, content: string, result: Result | null, process?: Step[] | null, feedback?: Rating | null, outcome?: Outcome | null }
 type ConversationSummary = { id: string, title: string }
 function upsertStep(previous: Step[], step: Step): Step[] {
   const index = previous.findIndex(item => item.id === step.id)
@@ -53,11 +59,11 @@ function App() {
       const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`)
       if (!response.ok) throw new Error()
       const conversation = await response.json()
-      setConversationId(id); setMessages(conversation.messages); setAnswer(''); setResult(undefined); setSteps([]); setStatus('')
+      setConversationId(id); setMessages(conversation.messages); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([]); setStatus('')
     } catch { setStatus('无法加载会话') }
   }
   function newConversation() {
-    setConversationId(undefined); setMessages([]); setAnswer(''); setResult(undefined); setSteps([]); setStatus(''); setQuestion('')
+    setConversationId(undefined); setMessages([]); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([]); setStatus(''); setQuestion('')
   }
   function confirmClear(id: string) {
     setClearError('')
@@ -86,6 +92,7 @@ function App() {
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [result, setResult] = useState<Result>()
+  const [outcome, setOutcome] = useState<Outcome>()
   const [status, setStatus] = useState('')
   const [steps, setSteps] = useState<Step[]>([])
   const [busy, setBusy] = useState(false)
@@ -99,7 +106,7 @@ function App() {
   }, [messages, answer, result, status, steps, conversationId])
   async function submit() {
     if (!question.trim() || busy) return
-    setBusy(true); setAnswer(''); setResult(undefined); setStatus('')
+    setBusy(true); setAnswer(''); setResult(undefined); setOutcome(undefined); setStatus('')
     setSteps([{ id: 'understand', title: '理解问题', state: 'active' }])
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: 'user', content: question, result: null }])
     let activeId = conversationId
@@ -125,20 +132,19 @@ function App() {
           if (kind === 'text') setAnswer(previous => previous + data.delta)
           if (kind === 'result') setResult(data)
           if (kind === 'error') setStatus(data.message)
-          if (kind === 'done') terminalStatus = data.status
+          if (kind === 'done') { terminalStatus = data.status; setOutcome(data.outcome); setStatus(data.outcome?.status === 'success' ? '查询完成' : '') }
         }
         if (done) break
       }
       if (!terminalStatus) throw new Error('响应流中断')
-      if (terminalStatus !== 'completed') return
       if (activeId) {
         const detail = await fetch(`/api/conversations/${encodeURIComponent(activeId)}`)
-        if (detail.ok) { setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined); setSteps([]) }
+        if (detail.ok) { setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([]) }
         await loadHistory()
       }
       setQuestion('')
     } catch {
-      setStatus('连接中断或服务不可用，请重试')
+      setAnswer(''); setResult(undefined); setOutcome({ status: 'model_error', reason: '连接中断或服务不可用，请重试' }); setStatus('')
       setSteps(previous => previous.map(step => step.state === 'active' ? { ...step, state: 'error' } : step))
     }
     finally { setBusy(false) }
@@ -170,7 +176,7 @@ function App() {
           {message.role === 'user' ? <div className="user-turn">{message.content}</div> : <>
             {message.process && message.process.length > 0 && <QueryProcess steps={message.process} />}
             <Card className="answer-card" title="说明">
-              <AnswerBody text={message.content} />
+              <AnswerBody text={replyText(message.content, message.outcome)} />
               <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
             </Card>
           </>}
@@ -179,8 +185,8 @@ function App() {
         {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>{spaceId === 'orders' ? '例如：查询各订单状态的订单金额' : '例如：查询今年各城市的销售额'}</p></Card>}
         {steps.length > 0 && <QueryProcess steps={steps} />}
         {status && <p className="status">{status}</p>}
-        {answer && <Card className="answer-card" title="说明"><AnswerBody text={answer} /></Card>}
-        {result && <ResultView data={result} />}
+        {(answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={replyText(answer, outcome)} /></Card>}
+        {result && (!outcome || outcome.status === 'success') && <ResultView data={result} />}
       </div>
       <div className="composer">
         <div className="ask">

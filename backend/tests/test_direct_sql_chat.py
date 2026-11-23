@@ -66,7 +66,7 @@ def order_chat(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "DUCKDB_PATH", str(path))
     monkeypatch.setattr(main, "DATABASE_URL", None)
 
-    def ask(client, candidates, message="按业务口径查询订单", conversation_id=None, check_prompt=True):
+    def ask(client, candidates, message="按业务口径查询订单", conversation_id=None, check_prompt=True, prompts=None):
         replies = []
 
         class Run:
@@ -81,6 +81,8 @@ def order_chat(monkeypatch, tmp_path):
 
         def runner(agent, prompt, **kwargs):
             nonlocal tool
+            if prompts is not None:
+                prompts.append(prompt)
             tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
             assert [item.name for item in agent.tools] == ["execute_direct_sql"]
             if not check_prompt:
@@ -88,7 +90,7 @@ def order_chat(monkeypatch, tmp_path):
             assert "方言版本：v" in prompt
             assert "sales_transactions" in prompt
             assert "WITH weekly_sales" not in prompt
-            assert "可以用 WITH、子查询、JOIN、GROUP BY 和窗口函数" in prompt
+            assert "可以用 WITH、子查询、JOIN、GROUP BY、窗口函数和 UNION ALL" in prompt
             assert "不要使用 WITH" not in prompt
             assert "本次授权的表：" in prompt
             authorized = prompt.split("本次授权的表：", 1)[1].split("授权关系：", 1)[0]
@@ -121,10 +123,16 @@ def order_chat(monkeypatch, tmp_path):
             assert "只回复下面这段原文" in prompt
             assert "可查询范围原文" in agent.instructions
             assert "本次执行 SQL" in agent.instructions
+            assert "问题条件和口径完整明确时立即执行" in agent.instructions
+            assert "不要要求补充可选的筛选、分组、输出列、排序或行数限制" in agent.instructions
+            assert "查询全部日期或状态" in agent.instructions
             assert "第一季度是 1–3 月" in prompt
             assert "不要再与 amount 相加" in prompt
             assert "基础粒度是单笔订单" in prompt
             assert "支付明细要先按 order_id 汇总" in prompt
+            assert "支付预汇总示例" in prompt
+            assert "COUNT(*) AS order_rows" in prompt
+            assert "SUM(paid.payment_rows) AS payment_rows" in prompt
             assert "main.payments" in authorized
             assert "stg_payments" not in prompt
             return Run()
@@ -358,7 +366,7 @@ def test_direct_follow_up_keeps_last_success_after_failure_and_shifts_leap_day(o
 def test_customer_count_shape_can_be_repaired_into_a_customer_grouping(order_chat, captured):
     repaired = "SELECT customer_id, COUNT(*) AS order_rows FROM orders GROUP BY customer_id"
     with TestClient(main.app) as client:
-        events, replies = order_chat(client, [captured, repaired], "帮我查一下目前有多少客户")
+        events, replies = order_chat(client, [captured, repaired], "按业务口径查询订单")
     assert "只允许访问已授权的订单表" not in replies[0]["error"]
     assert "客户标识" in replies[0]["error"]
     assert events["done"]["status"] == "completed"
@@ -366,13 +374,18 @@ def test_customer_count_shape_can_be_repaired_into_a_customer_grouping(order_cha
     assert "error" not in events
 
 
-def test_scope_question_returns_the_authorized_range_without_the_model(order_chat, monkeypatch):
+@pytest.mark.parametrize("question", [
+    "请问我能查询哪些信息？",
+    "我能查询什么？",
+    "我们查询什么？",
+])
+def test_scope_question_returns_the_authorized_range_without_the_model(order_chat, monkeypatch, question):
     def fail_runner(*args, **kwargs):
         raise AssertionError("能力问题不应调用模型")
 
     monkeypatch.setattr(main.Runner, "run_streamed", fail_runner)
     with TestClient(main.app) as client:
-        response = client.post("/api/chat/stream", json={"message": "请问我能查询哪些信息？"})
+        response = client.post("/api/chat/stream", json={"message": question})
         events = dict(
             (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
             for part in response.text.strip().split("\n\n")
@@ -394,6 +407,251 @@ def test_scope_question_returns_the_authorized_range_without_the_model(order_cha
     assert "stg_" not in text
     assert stored["messages"][1]["content"] == text
     assert stored["messages"][1]["result"] is None
+    assert stored["messages"][1]["outcome"]["status"] == "success"
+
+
+def test_model_scope_prose_is_replaced_with_the_authorized_range(order_chat, monkeypatch):
+    class Run:
+        async def stream_events(self):
+            arguments = json.dumps({
+                "sql": "",
+                "clarification": "用户问“我们查询什么？”，需要提示用户订单主题空间可查询的数据范围。",
+            })
+            context = ToolContext(None, tool_name=tool.name, tool_call_id="1", tool_arguments=arguments)
+            await tool.on_invoke_tool(context, arguments)
+            yield SimpleNamespace(
+                type="raw_response_event",
+                data=SimpleNamespace(type="response.output_text.delta", delta="这是订单主题空间。可以按订单日期筛选。"),
+            )
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = next(item for item in agent.tools if item.name == "execute_direct_sql")
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, "run_streamed", runner)
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat/stream", json={"message": "今天能看哪些订单数据"})
+        events = dict(
+            (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
+            for part in response.text.strip().split("\n\n")
+            for kind, data in [part.split("\n", 1)]
+        )
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+
+    assert events["done"]["status"] == "completed"
+    assert events["done"]["outcome"]["status"] == "success"
+    assert stored["messages"][1]["content"].startswith("可查询的数据范围")
+    assert "需要提示用户" not in stored["messages"][1]["content"]
+    assert stored["pending_clarification"] is None
+
+
+def test_average_only_question_is_refused_without_the_model(order_chat, monkeypatch):
+    def fail_runner(*args, **kwargs):
+        raise AssertionError("未发布的平均订单金额不应调用模型")
+
+    monkeypatch.setattr(main.Runner, "run_streamed", fail_runner)
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat/stream", json={"message": "平均订单金额是多少"})
+        events = dict(
+            (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
+            for part in response.text.strip().split("\n\n")
+            for kind, data in [part.split("\n", 1)]
+        )
+
+    assert events["done"]["outcome"]["status"] == "refused"
+    assert events["done"]["outcome"]["reason"] == "平均订单金额尚未发布，不能返回结果。"
+    assert "result" not in events
+
+
+def test_average_alongside_authorized_metrics_is_repaired_and_named(order_chat):
+    mixed = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount, AVG(amount) AS avg_order_amount "
+        "FROM orders WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = 'completed'"
+    )
+    repaired = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders "
+        "WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已完成'"
+    )
+    with TestClient(main.app) as client:
+        events, replies = order_chat(
+            client, [mixed, repaired],
+            "统计 2018-01-01 至 2018-04-09 期间，已完成订单的总笔数、订单金额和平均订单金额。",
+            check_prompt=False,
+        )
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+
+    assert "平均订单金额尚未发布" in replies[0]["error"]
+    assert "remaining_repairs" in replies[0]
+    assert events["done"]["outcome"]["status"] == "success"
+    assert events["result"]["columns"] == ["order_rows", "order_amount"]
+    assert stored["messages"][1]["content"].startswith("平均订单金额尚未发布，以下是已授权的订单笔数和订单金额。")
+
+
+def test_explicit_average_is_not_turned_into_a_confirmation(order_chat, monkeypatch):
+    question = "统计 2018-01-01 至 2018-04-09 期间，已完成订单的总笔数、订单金额和平均订单金额。"
+    clarification = "是否需要统计平均订单金额，还是只要总笔数和订单金额？"
+    repaired = (
+        "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders "
+        "WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已完成'"
+    )
+    seen = []
+
+    class Run:
+        async def stream_events(self):
+            clarify_args = json.dumps({"sql": "", "clarification": clarification})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id="clarify", tool_arguments=clarify_args)
+            seen.append(json.loads(await tool.on_invoke_tool(context, clarify_args)))
+            sql_args = json.dumps({"sql": repaired})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id="sql", tool_arguments=sql_args)
+            seen.append(json.loads(await tool.on_invoke_tool(context, sql_args)))
+            yield SimpleNamespace(
+                type="raw_response_event",
+                data=SimpleNamespace(type="response.output_text.delta", delta="完成"),
+            )
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = agent.tools[0]
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, "run_streamed", runner)
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat/stream", json={"message": question})
+        events = dict(
+            (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
+            for part in response.text.strip().split("\n\n")
+            for kind, data in [part.split("\n", 1)]
+        )
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+
+    assert "平均订单金额尚未发布" in seen[0]["error"]
+    assert "remaining_repairs" in seen[0]
+    assert events["done"]["outcome"]["status"] == "success"
+    assert events["done"]["outcome"]["reason"] != clarification
+    assert events["result"]["columns"] == ["order_rows", "order_amount"]
+    assert events["result"]["rows"] == [[1, 10.0]]
+    assert stored["pending_clarification"] is None
+    assert stored["messages"][1]["content"].startswith("平均订单金额尚未发布，以下是已授权的订单笔数和订单金额。")
+
+
+def test_specified_breakdown_rejects_a_presentation_choice(order_chat, monkeypatch):
+    question = (
+        "找出 2018-01-01 至 2018-04-09 期间订单金额最高的 10 位客户，"
+        "进一步分析这 10 位客户在不同订单状态下的订单笔数和订单金额。"
+        "请按照客户和订单状态两个维度展示结果。"
+    )
+    clarification = (
+        "查询订单金额最高的10位客户后，是否直接展示这10位客户在不同订单状态下的订单笔数和订单金额，"
+        "还是先展示这10位客户列表？"
+    )
+    sql = (
+        "SELECT customer_id, status, COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders "
+        "WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' "
+        "GROUP BY customer_id, status"
+    )
+    seen = []
+    instructions = []
+
+    class Run:
+        async def stream_events(self):
+            clarify_args = json.dumps({"sql": "", "clarification": clarification, "options": ["直接展示分组", "先展示客户列表"]})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id="clarify", tool_arguments=clarify_args)
+            seen.append(json.loads(await tool.on_invoke_tool(context, clarify_args)))
+            sql_args = json.dumps({"sql": sql})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id="sql", tool_arguments=sql_args)
+            seen.append(json.loads(await tool.on_invoke_tool(context, sql_args)))
+            yield SimpleNamespace(
+                type="raw_response_event",
+                data=SimpleNamespace(type="response.output_text.delta", delta="完成"),
+            )
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = agent.tools[0]
+        instructions.append(agent.instructions)
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, "run_streamed", runner)
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat/stream", json={"message": question})
+        events = dict(
+            (kind.removeprefix("event: "), json.loads(data.removeprefix("data: ")))
+            for part in response.text.strip().split("\n\n")
+            for kind, data in [part.split("\n", 1)]
+        )
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+
+    assert "error" in seen[0]
+    assert seen[0].get("status") != "clarification_required"
+    assert "先展示客户列表" in instructions[0]
+    assert events["done"]["outcome"]["status"] == "success"
+    assert events["done"]["outcome"]["reason"] != clarification
+    assert events["result"]["columns"] == ["customer_id", "status", "order_rows", "order_amount"]
+    assert stored["pending_clarification"] is None
+
+
+def test_customer_share_is_repaired_without_executing_the_ratio(order_chat):
+    mixed = """
+        WITH orders_with_customer AS (
+          SELECT o.order_id, o.customer_id, o.amount
+          FROM orders AS o
+          JOIN customers AS c ON o.customer_id = c.customer_id
+          WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+        ),
+        summary_with_customer AS (
+          SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders_with_customer
+        ),
+        summary_all_orders AS (
+          SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+          FROM orders
+          WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+        )
+        SELECT
+          summary_with_customer.order_rows,
+          summary_with_customer.order_amount,
+          summary_all_orders.order_rows AS total_order_rows,
+          summary_all_orders.order_amount AS total_order_amount,
+          CASE WHEN summary_all_orders.order_rows = 0 THEN 0
+               ELSE summary_with_customer.order_rows * 1.0 / summary_all_orders.order_rows END AS order_rows_ratio
+        FROM summary_with_customer, summary_all_orders
+    """
+    repaired = """
+        WITH orders_with_customer AS (
+          SELECT o.order_id, o.customer_id, o.amount
+          FROM orders AS o
+          JOIN customers AS c ON o.customer_id = c.customer_id
+          WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+        ),
+        summary_with_customer AS (
+          SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders_with_customer
+        ),
+        summary_all_orders AS (
+          SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount
+          FROM orders
+          WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+        )
+        SELECT
+          summary_with_customer.order_rows,
+          summary_with_customer.order_amount,
+          summary_all_orders.order_rows AS total_order_rows,
+          summary_all_orders.order_amount AS total_order_amount
+        FROM summary_with_customer, summary_all_orders
+    """
+    question = "统计 2018-01-01 至 2018-04-09 期间，有客户记录的订单笔数和订单金额，并计算这部分订单占全部订单的比例。"
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [mixed, repaired], question, check_prompt=False)
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+
+    assert "订单占比尚未发布" in replies[0]["error"]
+    assert events["done"]["outcome"]["status"] == "success"
+    assert events["result"]["columns"] == ["order_rows", "order_amount", "total_order_rows", "total_order_amount"]
+    assert events["result"]["rows"] == [[3, 35.0, 3, 35.0]]
+    assert "order_rows_ratio" not in events["result"]["columns"]
+    assert stored["messages"][1]["content"].startswith("订单占比尚未发布，以下是已授权的订单笔数和订单金额。")
 
 
 def test_direct_follow_up_uses_prior_authorized_sql(order_chat):
@@ -496,20 +754,20 @@ def test_large_space_supplements_an_authorized_dataset_then_revalidates(order_ch
     assert events["done"]["status"] == "completed"
 
 
-def test_unauthorized_metric_reaches_the_chat_error(order_chat):
+def test_average_only_question_does_not_execute_the_submitted_sql(order_chat):
+    """只问未发布的平均金额时，在进模型前拒绝，不再把旁边的授权指标当成查询错误。"""
     sql = (
         "SELECT SUM(amount) AS order_amount, COUNT(*) AS order_rows, "
         "SUM(amount) / COUNT(*) AS avg_order_amount FROM orders"
     )
     with TestClient(main.app) as client:
         events, replies = order_chat(client, [sql], "平均订单金额", check_prompt=False)
-    message = events["error"]["message"]
     assert replies == []
-    assert events["done"]["status"] == "failed"
-    assert "avg_order_amount" in message
-    assert "已对上的指标：order_amount、order_rows" in message
-    assert "订单金额" in message
-    assert "订单笔数" in message
+    assert "error" not in events
+    assert "result" not in events
+    assert events["done"]["status"] == "completed"
+    assert events["done"]["outcome"]["status"] == "refused"
+    assert "平均订单金额尚未发布" in events["done"]["outcome"]["reason"]
 
 
 def test_large_space_still_rejects_an_unauthorized_dataset(order_chat, monkeypatch):
@@ -530,3 +788,298 @@ def test_context_coverage_stops_after_two_supplements(order_chat, monkeypatch):
     assert [reply["remaining_coverage"] for reply in replies] == [1, 0]
     assert events["done"]["status"] == "failed"
     assert "result" not in events
+
+
+def test_terminal_refusal_is_shared_with_history(order_chat):
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, ["SELECT secret FROM orders"])
+        assert events['done']['outcome']['status'] == 'refused'
+        history = client.get('/api/conversations/' + events['conversation']['conversation_id']).json()
+        assert history['messages'][-1]['outcome'] == events['done']['outcome']
+        assert history['messages'][-1]['result'] is None
+
+
+def test_clarification_outcome_overrides_partial_text_and_persists(order_chat, monkeypatch):
+    class Run:
+        async def stream_events(self):
+            yield SimpleNamespace(type='raw_response_event', data=SimpleNamespace(type='response.output_text.delta', delta='正在查询'))
+            args = json.dumps({'sql': '', 'clarification': '客户姓名不可查，请确认是否只查订单金额。'})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id='clarify', tool_arguments=args)
+            await tool.on_invoke_tool(context, args)
+            if False:
+                yield None
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = agent.tools[0]
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, 'run_streamed', runner)
+    with TestClient(main.app) as client:
+        from app.evaluation.runner import send
+        response = send(client, '按业务口径查询订单')
+        assert response['outcome'] == {'status': 'clarification_required', 'reason': '客户姓名不可查，请确认是否只查订单金额。'}
+        history = client.get('/api/conversations/' + response['conversation_id']).json()
+        assert history['messages'][-1]['outcome'] == response['outcome']
+        assert history['messages'][-1]['content'] == response['outcome']['reason']
+        assert history['messages'][-1]['result'] is None
+
+
+def test_pending_ranking_survives_history_and_continues_with_original_date(order_chat):
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [], '2018年最高的客户是谁')
+        assert first['done']['outcome']['status'] == 'clarification_required'
+        assert 'result' not in first
+        cid = first['conversation']['conversation_id']
+        history = client.get(f'/api/conversations/{cid}').json()
+        assert history['pending_clarification']['question'] == '2018年最高的客户是谁'
+        second, replies = order_chat(client, ["SELECT customer_id, SUM(amount) AS order_amount FROM orders WHERE order_date BETWEEN '2018-01-01' AND '2018-12-31' GROUP BY customer_id ORDER BY order_amount DESC"], '按金额', cid)
+        assert second['done']['outcome']['status'] == 'success'
+        assert replies
+        assert client.get(f'/api/conversations/{cid}').json()['pending_clarification'] is None
+
+
+@pytest.mark.parametrize(('question', 'status'), [
+    ('客户姓名是什么', 'clarification_required'),
+    ('客户姓名和订单金额是多少', 'clarification_required'),
+    ('一共有多少个客户', 'clarification_required'),
+    ('成功的订单有多少笔', 'clarification_required'),
+    ('把订单金额和支付金额加在一起是多少', 'clarification_required'),
+    ('最高的客户是谁', 'clarification_required'),
+    ('NPS 是多少', 'refused'),
+    ('查询 stg_payments 和 raw_orders 各有多少行', 'refused'),
+    ('把订单和支付明细按订单标识直接连接后汇总订单金额', 'refused'),
+])
+def test_orders_preflight_has_no_rows_or_model_call(order_chat, question, status):
+    with TestClient(main.app) as client:
+        events, replies = order_chat(client, [], question)
+        assert events['done']['outcome']['status'] == status
+        assert 'result' not in events
+        assert replies == []
+        history = client.get('/api/conversations/' + events['conversation']['conversation_id']).json()
+        assert history['messages'][-1]['outcome'] == events['done']['outcome']
+
+
+def test_mixed_name_requires_confirmation_and_new_question_clears_pending(order_chat):
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [], '客户姓名和订单金额是多少')
+        cid = first['conversation']['conversation_id']
+        second, replies = order_chat(client, [TOTALS], '只查金额', cid)
+        assert second['done']['outcome']['status'] == 'success' and replies
+        order_chat(client, [], '2018年最高的客户是谁', cid)
+        result, _ = order_chat(client, [TOTALS], '订单总金额是多少', cid)
+        assert result['done']['outcome']['status'] == 'success'
+        assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
+
+
+@pytest.mark.parametrize('question', ['支付方式', '按支付方式'])
+def test_short_independent_question_replaces_pending(order_chat, question):
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [], '2018年最高的客户是谁')
+        cid = first['conversation']['conversation_id']
+        result, replies = order_chat(client, [TOTALS], question, cid)
+        assert result['done']['outcome']['status'] == 'success'
+        assert replies
+        assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
+
+
+@pytest.mark.parametrize(('question', 'sql'), [
+    ('订单金额最高的客户', 'SELECT customer_id, SUM(amount) AS order_amount FROM orders GROUP BY customer_id ORDER BY order_amount DESC'),
+    ('订单笔数最高的客户', 'SELECT customer_id, COUNT(*) AS order_rows FROM orders GROUP BY customer_id ORDER BY order_rows DESC'),
+])
+def test_explicit_ranking_metric_does_not_require_clarification(order_chat, question, sql):
+    with TestClient(main.app) as client:
+        result, replies = order_chat(client, [sql], question)
+        assert result['done']['outcome']['status'] == 'success'
+        assert replies
+
+
+def test_model_clarification_options_survive_history_and_resume(order_chat, monkeypatch):
+    from app.evaluation.runner import send
+    class Run:
+        async def stream_events(self):
+            args = json.dumps({'sql': '', 'clarification': '请选择时间范围', 'options': ['2018年', '2017年']})
+            context = ToolContext(None, tool_name=tool.name, tool_call_id='clarify', tool_arguments=args)
+            await tool.on_invoke_tool(context, args)
+            if False:
+                yield None
+
+    def runner(agent, prompt, **kwargs):
+        nonlocal tool
+        tool = agent.tools[0]
+        return Run()
+
+    tool = None
+    monkeypatch.setattr(main.Runner, 'run_streamed', runner)
+    with TestClient(main.app) as client:
+        first = send(client, '各订单状态的订单金额')
+        cid = first['conversation_id']
+        pending = client.get('/api/conversations/' + cid).json()['pending_clarification']
+        assert pending['question'] == '各订单状态的订单金额'
+        assert pending['options'] == ['2018年', '2017年']
+        second, replies = order_chat(client, [TOTALS], '2018年', cid)
+        assert second['done']['outcome']['status'] == 'success'
+        assert replies
+        assert client.get('/api/conversations/' + cid).json()['pending_clarification'] is None
+
+
+def test_authorized_payment_preaggregation_and_multiple_payments(order_chat):
+    with duckdb.connect(main.DUCKDB_PATH) as db:
+        db.execute('UPDATE orders SET order_id = customer_id WHERE customer_id IN (14, 15)')
+        db.execute("INSERT INTO payments VALUES (14, 'credit_card', 4, DATE '2018-01-01'), (14, 'coupon', 6, DATE '2018-01-01'), (15, 'credit_card', 20, DATE '2018-02-01')")
+    base = '''WITH paid AS (SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount FROM payments GROUP BY order_id)
+      SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount, SUM(paid.payment_rows) AS payment_rows,
+      SUM(paid.payment_amount) AS payment_amount FROM orders o JOIN paid ON paid.order_id = o.order_id
+      WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-12-31' '''
+    multiple = '''WITH paid AS (SELECT order_id, COUNT(*) AS payment_rows FROM payments GROUP BY order_id)
+      SELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount, SUM(paid.payment_rows) AS payment_rows
+      FROM orders o JOIN paid ON paid.order_id = o.order_id
+      WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-12-31' AND paid.payment_rows > 1'''
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [base], '先按订单汇总支付再查订单和支付金额')
+        assert first['done']['outcome']['status'] == 'success'
+        assert first['result']['rows'] == [[2, 30.0, 3, 30.0]]
+        second, _ = order_chat(client, [multiple], '先按订单汇总支付，查询支付笔数多于一的订单')
+        assert second['done']['outcome']['status'] == 'success'
+        assert second['result']['rows'] == [[1, 10.0, 2]]
+
+
+def test_prior_year_executes_without_model_confirmation_and_persists_empty_result(order_chat, monkeypatch):
+    from app.evaluation.runner import send
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, ["SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount FROM orders WHERE order_date BETWEEN '2015-01-01' AND '2015-04-09'"])
+        cid = first['conversation']['conversation_id']
+        def model_must_not_run(*args, **kwargs):
+            raise AssertionError('prior-year query needs no model confirmation')
+        monkeypatch.setattr(main.Runner, 'run_streamed', model_must_not_run)
+        followup = send(client, '去年同期', cid)
+        assert followup['outcome']['status'] == 'success'
+        assert followup['result']['rows'] == []
+        assert '2014-01-01' in followup['result']['sql']
+        assert '2014-04-09' in followup['result']['sql']
+        assert '2014-01-01' in followup['text'] and '没有' in followup['text']
+        history = client.get('/api/conversations/' + cid).json()
+        assert history['messages'][-1]['outcome'] == followup['outcome']
+        assert history['messages'][-1]['result'] == followup['result']
+
+
+def test_prior_year_timeout_preserves_last_success(order_chat, monkeypatch):
+    from app.evaluation.runner import send
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        cid = first['conversation']['conversation_id']
+        before = client.get('/api/conversations/' + cid).json()['last_query']
+        def timeout(*args, **kwargs):
+            raise main.SqlTimeout('订单查询超时')
+        monkeypatch.setattr(main, 'execute_order_sql', timeout)
+        response = send(client, '去年同期', cid)
+        assert response['outcome']['status'] == 'timeout'
+        history = client.get('/api/conversations/' + cid).json()
+        assert history['last_query'] == before
+        assert history['messages'][-1]['outcome'] == response['outcome']
+
+
+def test_prior_year_without_prior_date_requires_a_range(order_chat):
+    from app.evaluation.runner import send
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [TOTALS])
+        cid = first['conversation']['conversation_id']
+        before = client.get('/api/conversations/' + cid).json()['last_query']
+        response = send(client, '去年同期', cid)
+        assert response['outcome']['status'] == 'clarification_required'
+        assert '日期范围' in response['outcome']['reason']
+        assert 'result' not in response
+        assert client.get('/api/conversations/' + cid).json()['last_query'] == before
+
+
+def test_ranked_customers_by_status_runs_without_clarification(order_chat):
+    question = (
+        "找出 2018-01-01 至 2018-04-09 期间订单金额最高的 10 位客户，"
+        "进一步分析这 10 位客户在不同订单状态下的订单笔数和订单金额。"
+        "请按照客户和订单状态两个维度展示结果。"
+    )
+    sql = """
+        WITH top_customers AS (
+          SELECT customer_id
+          FROM orders
+          WHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+          GROUP BY customer_id
+          ORDER BY SUM(amount) DESC
+          LIMIT 10
+        )
+        SELECT o.customer_id, o.status, COUNT(*) AS order_rows, SUM(o.amount) AS order_amount
+        FROM orders AS o
+        INNER JOIN top_customers AS top_customers ON o.customer_id = top_customers.customer_id
+        WHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'
+        GROUP BY o.customer_id, o.status
+        ORDER BY o.customer_id, o.status
+    """
+    with TestClient(main.app) as client:
+        events, _ = order_chat(client, [sql], question, check_prompt=False)
+        stored = client.get(f"/api/conversations/{events['conversation']['conversation_id']}").json()
+    assert events["done"]["outcome"]["status"] == "success"
+    assert stored["pending_clarification"] is None
+    assert events["result"]["columns"] == ["customer_id", "status", "order_rows", "order_amount"]
+    assert events["result"]["rows"] == [
+        [14, "已完成", 1, 10.0],
+        [15, "已下单", 1, 20.0],
+        [16, "已退货", 1, 5.0],
+    ]
+
+
+def test_follow_up_prompt_includes_verified_rows(order_chat):
+    prompts = []
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        conversation_id = first["conversation"]["conversation_id"]
+        order_chat(
+            client,
+            ["SELECT COUNT(*) AS order_rows FROM orders"],
+            "只做总结不查数据了",
+            conversation_id,
+            prompts=prompts,
+        )
+    assert first["result"]["rows"] == [[3, 35.0]]
+    assert "最近一次已验证的查询结果" in prompts[0]
+    assert "35.0" in prompts[0]
+
+
+def test_prose_without_a_query_keeps_the_answer_body(order_chat, monkeypatch):
+    prose = "按上一轮结果，订单共 99 笔。"
+
+    class Run:
+        async def stream_events(self):
+            yield SimpleNamespace(
+                type="raw_response_event",
+                data=SimpleNamespace(type="response.output_text.delta", delta=prose),
+            )
+            if False:
+                yield None
+
+    def runner(agent, prompt, **kwargs):
+        return Run()
+
+    monkeypatch.setattr(main.Runner, "run_streamed", runner)
+    with TestClient(main.app) as client:
+        from app.evaluation.runner import send
+        response = send(client, "只做总结不查数据了")
+        history = client.get("/api/conversations/" + response["conversation_id"]).json()
+    message = history["messages"][-1]
+    assert message["content"] == prose
+    assert message["outcome"]["status"] == "invalid_output"
+    assert response.get("error", {}).get("message", prose) == prose
+
+
+def test_prior_year_with_additional_grouping_uses_the_model_query(order_chat):
+    grouped = ("SELECT status, COUNT(*) AS order_rows FROM orders "
+               "WHERE order_date BETWEEN '2017-01-01' AND '2017-12-31' GROUP BY status")
+    with TestClient(main.app) as client:
+        first, _ = order_chat(client, [HISTORICAL])
+        cid = first['conversation']['conversation_id']
+        followup, replies = order_chat(client, [grouped], '去年同期按状态分组', cid)
+        assert followup['done']['outcome']['status'] == 'success'
+        assert replies
+        assert followup['result']['columns'] == ['status', 'order_rows']
+        assert '2017-01-01' in followup['result']['sql']
+        assert 'GROUP BY' in followup['result']['sql']

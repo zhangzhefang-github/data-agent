@@ -1,4 +1,5 @@
 import asyncio
+import duckdb
 import fcntl
 import json
 import logging
@@ -19,11 +20,15 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
+from app.order_clarification import (
+    PRESENTATION_REPAIR, decide, is_presentation_choice, mentions_authorized_order_metric,
+    mentions_unpublished_average, mentions_unpublished_share, resume, specified_customer_status_breakdown,
+)
 from app.direct_sql import (
-    SqlCorrection, SqlRejected, SqlTimeout, context_coverage_gap, execute_order_sql,
+    SqlCorrection, SqlRejected, SqlTimeout, _AVERAGE_REPAIR, context_coverage_gap, execute_order_sql,
     order_database_context, prior_order_sql,
 )
-from app.query_scope import is_query_scope_question, render_query_scope
+from app.query_scope import is_query_scope_question, looks_like_scope_answer, render_query_scope
 from app.semantic.query_ir_adapter import catalog_from_semantic_context
 from app.semantic.retrieval import (
     MAX_CONTEXT_COVERAGE, expand_authorization, expansion_payload, include_datasets, is_small_space, short_catalog,
@@ -131,6 +136,28 @@ def _settle_progress(progress: QueryProgress, state: str) -> list[str]:
     return settled
 
 
+def last_verified_result(conversation: dict | None) -> dict | None:
+    """上一轮已经执行并保存的列和行。没有结果时不编造。"""
+    if not conversation:
+        return None
+    for message in reversed(conversation.get("messages") or []):
+        result = message.get("result")
+        if message.get("role") == "assistant" and isinstance(result, dict) and "rows" in result:
+            return {"columns": result.get("columns") or [], "rows": result["rows"]}
+    return None
+
+
+def visible_answer(streamed: str, outcome: dict) -> str:
+    """落库正文。模型已经写出的回答保留；澄清和失败才用原因作为给人看的字。"""
+    text = streamed.strip()
+    reason = str(outcome.get("reason") or "").strip()
+    if outcome.get("status") == "invalid_output" and text:
+        return streamed
+    if outcome.get("status") != "success" and reason:
+        return reason
+    return streamed
+
+
 def last_year(day: date) -> date:
     try:
         return day.replace(year=day.year - 1)
@@ -169,8 +196,11 @@ async def chat(request: ChatRequest):
         query_data = []
         answer = []
         progress = QueryProgress()
+        saved = False
+        terminal = None
         context = conversation["last_query"] if conversation else None
         is_previous_period = bool(re.search(r"去年同期", request.message))
+        is_pure_previous_period = bool(re.fullmatch(r"\s*(?:(?:那|那么|请问|查询|查看|看看|查一下)\s*)?去年同期(?:呢|是多少|怎么样|的情况)?[？?。！!]*\s*", request.message))
         source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
         direct_sql = CATALOG["id"] == "orders" and source.engine == "duckdb"
         business_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
@@ -194,22 +224,48 @@ async def chat(request: ChatRequest):
         elif context and context.get("mode") == "orders_duckdb":
             context = None
 
+        effective_question = request.message
+        if direct_sql:
+            pending = conversation.get("pending_clarification") if conversation else None
+            resumed = resume(pending, request.message) if pending else None
+            resolved = set()
+            if resumed:
+                effective_question, resolved = resumed
+            if pending:
+                conversations.set_pending(CONVERSATIONS, conversation_id, None)
+            decision = decide(effective_question, resolved)
+            if decision:
+                status, message, kind = decision
+                if kind:
+                    conversations.set_pending(CONVERSATIONS, conversation_id, {
+                        "question": effective_question, "kind": kind, "resolved": sorted(resolved), "reason": message,
+                    })
+                yield event("conversation", {"conversation_id": conversation_id})
+                yield event("text", {"delta": message})
+                outcome = {"status": status, "reason": message}
+                message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
+                yield event("message", {"id": message_id})
+                yield event("done", {"status": "completed", "outcome": outcome})
+                return
+
         if direct_sql and is_query_scope_question(request.message):
             message = render_query_scope(snapshot.authorization)
             yield event("conversation", {"conversation_id": conversation_id})
             yield event("text", {"delta": message})
-            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
+            outcome = {"status": "success", "reason": message}
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
             yield event("message", {"id": message_id})
-            yield event("done", {"status": "completed"})
+            yield event("done", {"status": "completed", "outcome": outcome})
             return
 
         if is_previous_period and not context:
             message = f"请先提供需要对比的{CATALOG['name']}查询，再询问去年同期。"
             yield event("conversation", {"conversation_id": conversation_id})
             yield event("text", {"delta": message})
-            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message)
+            outcome = {"status": "clarification_required", "reason": message}
+            message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
             yield event("message", {"id": message_id})
-            yield event("done", {"status": "completed"})
+            yield event("done", {"status": "completed", "outcome": outcome})
             return
 
         @function_tool
@@ -265,21 +321,62 @@ async def chat(request: ChatRequest):
         presentation = None
 
         @function_tool(failure_error_function=None)
-        async def execute_direct_sql(sql: str) -> str:
+        async def execute_direct_sql(sql: str, clarification: str = "", options: list[str] | None = None) -> str:
             """Execute one DuckDB SELECT submitted as SQL, with no surrounding Markdown."""
-            nonlocal attempts, coverage_attempts, query_error, presentation
+            nonlocal attempts, coverage_attempts, query_error, presentation, terminal
             async with query_lock:
+                if clarification:
+                    # 名次、客户和订单状态已经写明，展示顺序不是业务口径。
+                    if (
+                        not result_data
+                        and specified_customer_status_breakdown(effective_question)
+                        and is_presentation_choice(clarification)
+                    ):
+                        attempts += 1
+                        if attempts < 3 and not is_previous_period:
+                            return json.dumps({
+                                "error": PRESENTATION_REPAIR,
+                                "remaining_repairs": 3 - attempts,
+                            }, ensure_ascii=False)
+                        query_error = "SQL 修复后仍无法执行"
+                        terminal = {"status": "validator_error", "reason": query_error}
+                        raise SqlRejected(query_error)
+                    # 平均订单金额和已授权指标已经同时点名，不再问用户要不要平均。
+                    if (
+                        not result_data
+                        and mentions_unpublished_average(effective_question)
+                        and mentions_authorized_order_metric(effective_question)
+                    ):
+                        attempts += 1
+                        if attempts < 3 and not is_previous_period:
+                            return json.dumps({
+                                "error": _AVERAGE_REPAIR,
+                                "remaining_repairs": 3 - attempts,
+                            }, ensure_ascii=False)
+                        query_error = "SQL 修复后仍无法执行"
+                        terminal = {"status": "validator_error", "reason": query_error}
+                        raise SqlRejected(query_error)
+                    if not result_data:
+                        terminal = {"status": "clarification_required", "reason": clarification}
+                        conversations.set_pending(CONVERSATIONS, conversation_id, {
+                            "question": effective_question, "kind": "model", "resolved": sorted(resolved),
+                            "reason": clarification, "options": [option.strip() for option in options or [] if option.strip()],
+                        })
+                    return json.dumps(terminal or {"status": "success"}, ensure_ascii=False)
+                if terminal:
+                    return json.dumps(terminal, ensure_ascii=False)
                 if result_data:
                     return json.dumps(result_data[-1], ensure_ascii=False)
                 if query_error or attempts >= 3:
                     raise SqlRejected("查询已结束")
-                candidate = previous_sql if is_previous_period and previous_sql else sql
+                candidate = previous_sql if is_pure_previous_period and previous_sql else sql
                 # 补充只发生在大空间的检索遗漏。校验仍用完整授权，未授权表直接拒绝。
                 if snapshot is not None and presentation is not None and not is_previous_period:
                     gap = context_coverage_gap(candidate, snapshot.authorization, presentation)
                     if gap:
                         if coverage_attempts >= MAX_CONTEXT_COVERAGE:
                             query_error = "已授权上下文补充次数已用尽"
+                            terminal = {"status": "validator_error", "reason": query_error}
                             raise SqlRejected(query_error)
                         coverage_attempts += 1
                         progress.publish(f"context-{coverage_attempts}", "补充已授权的数据集", "done")
@@ -306,11 +403,13 @@ async def chat(request: ChatRequest):
                     if attempts < 3 and not is_previous_period:
                         return json.dumps({"error": str(exc), "remaining_repairs": 3 - attempts}, ensure_ascii=False)
                     query_error = "SQL 修复后仍无法执行"
+                    terminal = {"status": "validator_error", "reason": query_error}
                     raise
                 except SqlRejected as exc:
                     logger.error("Direct SQL rejected (%s): %s", exc, candidate)
                     progress.publish(step_id, query_title, "error")
                     query_error = str(exc)
+                    terminal = {"status": "refused", "reason": query_error}
                     raise
                 result_data.append(data)
                 query_data.append({"mode": "orders_duckdb", "sql": data["sql"]})
@@ -321,7 +420,7 @@ async def chat(request: ChatRequest):
         yield event("status", {"status": "running"})
         yield event("progress", progress.record("understand", "理解问题", "active"))
         try:
-            prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{request.message}"
+            prompt = f"当前业务日期：{business_today.isoformat()}（Asia/Shanghai）。\n用户的问题：{effective_question}"
             tools = [get_semantic_catalog, resolve_business_terms, execute_semantic_query]
             instructions = space_instructions(CATALOG)
             run_options = {}
@@ -336,23 +435,59 @@ async def chat(request: ChatRequest):
                         saved_sql, request_catalog, business_today,
                         shift=last_year if is_previous_period else None, joins=join_keys,
                     )
+                if is_previous_period and previous_sql and not re.search(r"\d{4}-\d{2}-\d{2}", previous_sql):
+                    message = "上一轮查询没有日期范围，请先提供日期范围再询问去年同期。"
+                    outcome = {"status": "clarification_required", "reason": message}
+                    yield event("text", {"delta": message})
+                    message_id = conversations.add_message(CONVERSATIONS, conversation_id, "assistant", message, outcome=outcome)
+                    saved = True
+                    yield event("message", {"id": message_id})
+                    yield event("done", {"status": "completed", "outcome": outcome})
+                    return
+                if is_pure_previous_period and previous_sql:
+                    # 服务已根据最近成功查询确定同期 SQL；不能再由模型决定是否执行。
+                    data = await asyncio.to_thread(
+                        execute_order_sql, Path(source.location), previous_sql, request_catalog, business_today, join_keys,
+                    )
+                    dates = list(dict.fromkeys(re.findall(r"\d{4}-\d{2}-\d{2}", data["sql"])))
+                    period = " 至 ".join(dates)
+                    message = (f"去年同期（{period}）" if period else "去年同期") + (
+                        "查询完成。" if data["rows"] else "没有可对比的订单。"
+                    )
+                    yield event("text", {"delta": message})
+                    yield event("result", data)
+                    outcome = {"status": "success", "reason": "查询完成"}
+                    message_id = conversations.add_message(
+                        CONVERSATIONS, conversation_id, "assistant", message, data,
+                        {"mode": "orders_duckdb", "sql": data["sql"]}, outcome=outcome,
+                    )
+                    saved = True
+                    yield event("message", {"id": message_id})
+                    yield event("done", {"status": "completed", "outcome": outcome})
+                    return
                 if is_small_space(snapshot.authorization):
                     presentation = snapshot.authorization
                 else:
                     presentation = expand_authorization(
-                        snapshot.authorization, request.message, snapshot.object_datasets,
+                        snapshot.authorization, effective_question, snapshot.object_datasets,
                     )
                 instructions = (
                     "你是订单主题空间助手。用 execute_direct_sql 提交 DuckDB SQL。"
                     "只使用本次授权的表和列，以及授权指标的表达式和结果别名。"
                     "经典示例只说明方言写法，示例中的表不代表已经授权。"
-                    "用户说出时间时写入对应日期条件。用户没有说出时间时不要添加日期条件。"
+                    "用户说出时间时写入对应日期条件。用户没有说出时间或状态时查询全部日期或状态。"
+                    "问题条件和口径完整明确时立即执行，不要再次确认已明确的条件；不要要求补充可选的筛选、分组、输出列、排序或行数限制。"
+                    "用户已经说出支付笔数和支付金额，并点名信用卡、优惠券、银行转账或礼品卡时，支付笔数就是支付行数，不是订单笔数。直接按 payment_method 分组查询，不要再确认口径。"
+                    "用户已经按订单金额点名前若干位客户，并要求按客户和订单状态统计订单笔数和订单金额时，直接提交这一条分组 SQL，不要询问先展示客户列表还是展示分组。"
+                    "用户已经同时说出平均订单金额和订单笔数或订单金额时，不要向用户确认。直接提交已授权指标的 SQL，不要写平均、除法或未授权别名。"
                     "未写 LIMIT 时使用默认行数上限。"
                     "有 SQL 修复反馈时按反馈调整，权限拒绝时结束。依据返回结果用中文解释。"
+                    "需要用户澄清时，不要执行查询，调用 execute_direct_sql，sql 为空字符串，clarification 填写澄清说明，options 填写可供用户选择的选项文本列表。"
                     "去年同期的日期已经由服务算好，写在本次提示开头。解释时原样复述，不要再减一年，也不要改成当前业务日期。结果为空时说明该区间没有可对比的订单，不要把空结果说成查询失败。"
-                    "针对去年同期，调用工具提交服务提供的同期 SQL，不要自行改写日期。"
+                    "针对去年同期的附加要求，以服务提供的同期 SQL 为起点，按用户要求调整筛选或分组，不要再次平移日期。"
                     "解释里的日期必须与本次执行 SQL 中的日期字面量一致。空结果也写出 SQL 里的起止日期，不能改用当前业务日期，也不能写成当前业务日期的上一年同一天。"
                     "用户询问可查询范围时，只回复提示中的可查询范围原文，不要调用工具。"
+                    "提示中若有最近一次已验证的查询结果，用户要求总结或不再查询时，依据该结果说明，不要再调用工具。"
                 )
                 # 订单 Direct SQL 只保留执行器。目录工具会按问题裁剪授权，和本次提示不是同一份范围。
                 tools = [execute_direct_sql]
@@ -370,6 +505,9 @@ async def chat(request: ChatRequest):
                     )
                 if previous_sql:
                     prompt += f"\n{'已确定的同期 SQL' if is_previous_period else '最近一次成功的查询 SQL'}：{previous_sql}"
+                    verified = None if is_previous_period else last_verified_result(conversation)
+                    if verified:
+                        prompt += "\n最近一次已验证的查询结果：" + json.dumps(verified, ensure_ascii=False)
                     if is_previous_period:
                         executed_dates = list(dict.fromkeys(re.findall(r"\d{4}-\d{2}-\d{2}", previous_sql)))
                         if executed_dates:
@@ -402,35 +540,91 @@ async def chat(request: ChatRequest):
                         yield event("progress", progress.record("explain", "整理说明", "active"))
                     answer.append(item.data.delta)
                     yield event("text", {"delta": item.data.delta})
-            if direct_sql and not result_data and attempts:
-                raise SqlCorrection("查询未返回已验证的结果")
-            if progress.state_of("explain") == "active":
-                yield event("progress", progress.record("explain", "整理说明", "done"))
-            for step in list(progress.steps):
-                if step["state"] == "active":
-                    yield event("progress", progress.record(step["id"], step["title"], "done"))
+            text = "".join(answer).strip()
+            for done_event in _settle_progress(progress, "done"):
+                yield done_event
+            # 能力问题应直接给出授权范围。模型若只写了说明，或把内部指令放进澄清，仍改回原文。
+            if (
+                direct_sql and snapshot is not None and not result_data
+                and (terminal is None or terminal.get("status") == "clarification_required")
+                and (is_query_scope_question(request.message) or looks_like_scope_answer(text))
+            ):
+                if terminal and terminal.get("status") == "clarification_required":
+                    conversations.set_pending(CONVERSATIONS, conversation_id, None)
+                message = render_query_scope(snapshot.authorization)
+                outcome = {"status": "success", "reason": message}
+                message_id = conversations.add_message(
+                    CONVERSATIONS, conversation_id, "assistant", message,
+                    process=list(progress.steps) or None, outcome=outcome,
+                )
+                saved = True
+                yield event("message", {"id": message_id})
+                yield event("done", {"status": "completed", "outcome": outcome})
+                return
+            if terminal:
+                raise SqlRejected(terminal["reason"])
+            if direct_sql and not result_data:
+                if attempts:
+                    raise SqlCorrection("查询未返回已验证的结果")
+                terminal = {"status": "invalid_output", "reason": "未返回查询结果或澄清说明"}
+                raise ValueError(terminal["reason"])
             if result_data:
                 yield event("result", result_data[-1])
+            content = "".join(answer)
+            # 平均口径未发布时仍返回旁边的授权指标，并在说明里点名原因。
+            if result_data and mentions_unpublished_average(effective_question):
+                note = "平均订单金额尚未发布，以下是已授权的订单笔数和订单金额。"
+                if not content.startswith(note):
+                    content = note + "\n" + content
+            if result_data and mentions_unpublished_share(effective_question):
+                note = "订单占比尚未发布，以下是已授权的订单笔数和订单金额。"
+                if not content.startswith(note):
+                    content = note + "\n" + content
+            outcome = {"status": "success", "reason": "查询完成"}
             message_id = conversations.add_message(
-                CONVERSATIONS, conversation_id, "assistant", "".join(answer),
+                CONVERSATIONS, conversation_id, "assistant", content,
                 result_data[-1] if result_data else None, query_data[-1] if query_data else None,
-                list(progress.steps) or None,
+                list(progress.steps) or None, outcome=outcome,
             )
+            saved = True
             yield event("message", {"id": message_id})
-            yield event("done", {"status": "completed"})
+            yield event("done", {"status": "completed", "outcome": outcome})
         except asyncio.CancelledError:
+            if not saved:
+                outcome = {"status": "model_error", "reason": "响应流中断"}
+                conversations.add_message(
+                    CONVERSATIONS, conversation_id, "assistant",
+                    visible_answer("".join(answer), outcome), outcome=outcome,
+                )
             raise
-        except SqlTimeout as exc:
-            for failed in _settle_progress(progress, "error"):
-                yield failed
-            yield event("error", {"message": str(exc), "code": "query_timeout"})
-            yield event("done", {"status": "failed"})
         except Exception as exc:
             logger.error("Agent request failed (%s)", type(exc).__name__)
             for failed in _settle_progress(progress, "error"):
                 yield failed
-            yield event("error", {"message": query_error or "查询失败，请检查模型连接和服务配置", "code": "query_failed"})
-            yield event("done", {"status": "failed"})
+            if terminal:
+                outcome = terminal
+            elif isinstance(exc, SqlRejected):
+                outcome = {"status": "refused", "reason": str(exc)}
+            elif isinstance(exc, SqlTimeout):
+                outcome = {"status": "timeout", "reason": str(exc)}
+            elif isinstance(exc, SqlCorrection):
+                outcome = {"status": "validator_error", "reason": str(exc)}
+            elif isinstance(exc, duckdb.Error):
+                outcome = {"status": "database_error", "reason": "数据库查询失败"}
+            else:
+                outcome = {"status": "model_error", "reason": "查询失败，请检查模型连接和服务配置"}
+            content = visible_answer("".join(answer), outcome)
+            message_id = conversations.add_message(
+                CONVERSATIONS, conversation_id, "assistant", content,
+                process=list(progress.steps) or None, outcome=outcome,
+            )
+            yield event("message", {"id": message_id})
+            reason = str(outcome.get("reason") or "").strip()
+            answer_stands = outcome["status"] == "invalid_output" and content.strip() and content.strip() != reason
+            if outcome["status"] != "clarification_required" and not answer_stands:
+                code = "query_timeout" if outcome["status"] == "timeout" else "query_failed"
+                yield event("error", {"message": outcome["reason"], "code": code})
+            yield event("done", {"status": "completed" if outcome["status"] == "clarification_required" else "failed", "outcome": outcome})
 
     async def guarded_stream():
         try:

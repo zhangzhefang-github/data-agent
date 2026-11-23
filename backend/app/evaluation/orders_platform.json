@@ -1,0 +1,4602 @@
+{
+  "dataset_id": "orders_platform",
+  "dataset_version": "2026-11-22",
+  "baseline_commit": "53a930d0de2e83d312b964655aea12bf187676c0",
+  "result_source": "execute_order_sql",
+  "domain": "sales",
+  "space_id": "orders",
+  "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+  "cases": [
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "window_order_totals",
+      "intent_id": "window_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "aggregate"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            99,
+            1672.0
+          ]
+        ]
+      },
+      "business_basis": "验收该日期窗口内已发布的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "completed_order_totals",
+      "intent_id": "completed_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "status_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 已完成订单的笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已完成"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已完成'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            67,
+            1103.0
+          ]
+        ]
+      },
+      "business_basis": "验收该窗口内已完成订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "placed_order_totals",
+      "intent_id": "placed_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "status_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 已下单订单的笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已下单"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已下单'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            13,
+            284.0
+          ]
+        ]
+      },
+      "business_basis": "验收该窗口内已下单订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "shipped_order_totals",
+      "intent_id": "shipped_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "status_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 已发货订单的笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已发货"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已发货'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            13,
+            198.0
+          ]
+        ]
+      },
+      "business_basis": "验收该窗口内已发货订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "returned_order_totals",
+      "intent_id": "returned_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "status_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 已退货订单的笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已退货"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已退货'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            4,
+            49.0
+          ]
+        ]
+      },
+      "business_basis": "验收该窗口内已退货订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "return_pending_order_totals",
+      "intent_id": "return_pending_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "status_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 退货中订单的笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "退货中"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '退货中'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            2,
+            38.0
+          ]
+        ]
+      },
+      "business_basis": "验收该窗口内退货中订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "open_order_totals",
+      "intent_id": "open_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "status_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 仍处于已下单或已发货的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "in",
+          "value": [
+            "已下单",
+            "已发货"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status IN ('已下单', '已发货')",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            26,
+            482.0
+          ]
+        ]
+      },
+      "business_basis": "验收仍处于已下单或已发货的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "january_order_totals",
+      "intent_id": "january_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "date_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-01-31 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-01-31"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-01-31'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            29,
+            496.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 1 月的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "february_order_totals",
+      "intent_id": "february_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "date_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-02-01 至 2018-02-28 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-02-01",
+            "2018-02-28"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-02-01' AND DATE '2018-02-28'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            27,
+            415.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 2 月的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "march_order_totals",
+      "intent_id": "march_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "date_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-03-01 至 2018-03-31 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-03-01",
+            "2018-03-31"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-03-01' AND DATE '2018-03-31'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            35,
+            622.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 3 月的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "april_order_totals",
+      "intent_id": "april_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "date_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-04-01 至 2018-04-09 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-04-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-04-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            8,
+            139.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 4 月 1 日至 9 日的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "q1_order_totals",
+      "intent_id": "q1_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "date_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-03-31 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-03-31"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-03-31'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            91,
+            1533.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年第一季度的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "customer_51_order_totals",
+      "intent_id": "customer_51_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "customer_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-04-09 客户标识 51 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.customer_id",
+          "operator": "eq",
+          "value": 51
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND customer_id = 51",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            3,
+            99.0
+          ]
+        ]
+      },
+      "business_basis": "验收客户标识 51 在该窗口内的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "tender_amounts",
+      "intent_id": "tender_amounts",
+      "category": "基础指标与过滤",
+      "tags": [
+        "order_payment_columns"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+      "expected_metrics": [
+        "orders.credit_card_amount",
+        "orders.coupon_amount",
+        "orders.bank_transfer_amount",
+        "orders.gift_card_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT SUM(credit_card_amount) AS credit_card_amount,\n       SUM(coupon_amount) AS coupon_amount,\n       SUM(bank_transfer_amount) AS bank_transfer_amount,\n       SUM(gift_card_amount) AS gift_card_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "credit_card_amount",
+          "coupon_amount",
+          "bank_transfer_amount",
+          "gift_card_amount"
+        ],
+        "rows": [
+          [
+            871.0,
+            185.0,
+            411.0,
+            205.0
+          ]
+        ]
+      },
+      "business_basis": "验收订单上四种支付金额各自的合计，且不与订单金额相加。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "first_week_order_totals",
+      "intent_id": "first_week_order_totals",
+      "category": "基础指标与过滤",
+      "tags": [
+        "date_filter"
+      ],
+      "difficulty": "低",
+      "user_question": "2018-01-01 至 2018-01-07 的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-01-07"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-01-07'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            6,
+            79.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 1 月第一周的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "status_breakdown",
+      "intent_id": "status_breakdown",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 按订单状态统计订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "已下单",
+            13,
+            284.0
+          ],
+          [
+            "已退货",
+            4,
+            49.0
+          ],
+          [
+            "已发货",
+            13,
+            198.0
+          ],
+          [
+            "已完成",
+            67,
+            1103.0
+          ],
+          [
+            "退货中",
+            2,
+            38.0
+          ]
+        ]
+      },
+      "business_basis": "验收按订单状态拆开后的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "intent_id": "by_customer",
+      "category": "多维度与时间",
+      "difficulty": "中",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "case_id": "by_customer",
+      "tags": [
+        "legacy"
+      ],
+      "user_question": "2018-01-01 至 2018-04-09 按客户标识统计订单笔数和订单金额",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY customer_id",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            1,
+            2,
+            33.0
+          ],
+          [
+            2,
+            1,
+            23.0
+          ],
+          [
+            3,
+            3,
+            65.0
+          ],
+          [
+            6,
+            1,
+            8.0
+          ],
+          [
+            7,
+            1,
+            26.0
+          ],
+          [
+            8,
+            2,
+            45.0
+          ],
+          [
+            9,
+            1,
+            30.0
+          ],
+          [
+            11,
+            1,
+            3.0
+          ],
+          [
+            12,
+            1,
+            4.0
+          ],
+          [
+            13,
+            1,
+            26.0
+          ],
+          [
+            16,
+            1,
+            12.0
+          ],
+          [
+            18,
+            1,
+            29.0
+          ],
+          [
+            19,
+            1,
+            3.0
+          ],
+          [
+            20,
+            1,
+            15.0
+          ],
+          [
+            21,
+            1,
+            22.0
+          ],
+          [
+            22,
+            3,
+            52.0
+          ],
+          [
+            25,
+            2,
+            24.0
+          ],
+          [
+            26,
+            2,
+            8.0
+          ],
+          [
+            27,
+            2,
+            27.0
+          ],
+          [
+            28,
+            1,
+            3.0
+          ],
+          [
+            30,
+            2,
+            57.0
+          ],
+          [
+            31,
+            1,
+            18.0
+          ],
+          [
+            32,
+            1,
+            30.0
+          ],
+          [
+            33,
+            1,
+            14.0
+          ],
+          [
+            34,
+            1,
+            3.0
+          ],
+          [
+            35,
+            2,
+            34.0
+          ],
+          [
+            36,
+            1,
+            28.0
+          ],
+          [
+            38,
+            1,
+            15.0
+          ],
+          [
+            39,
+            1,
+            10.0
+          ],
+          [
+            40,
+            1,
+            3.0
+          ],
+          [
+            41,
+            1,
+            10.0
+          ],
+          [
+            42,
+            2,
+            27.0
+          ],
+          [
+            46,
+            2,
+            64.0
+          ],
+          [
+            47,
+            2,
+            36.0
+          ],
+          [
+            50,
+            2,
+            47.0
+          ],
+          [
+            51,
+            3,
+            99.0
+          ],
+          [
+            52,
+            1,
+            27.0
+          ],
+          [
+            53,
+            2,
+            39.0
+          ],
+          [
+            54,
+            5,
+            57.0
+          ],
+          [
+            57,
+            2,
+            26.0
+          ],
+          [
+            59,
+            1,
+            1.0
+          ],
+          [
+            63,
+            2,
+            23.0
+          ],
+          [
+            64,
+            2,
+            30.0
+          ],
+          [
+            66,
+            3,
+            39.0
+          ],
+          [
+            68,
+            1,
+            23.0
+          ],
+          [
+            69,
+            2,
+            32.0
+          ],
+          [
+            70,
+            2,
+            54.0
+          ],
+          [
+            71,
+            3,
+            44.0
+          ],
+          [
+            76,
+            1,
+            2.0
+          ],
+          [
+            79,
+            2,
+            27.0
+          ],
+          [
+            80,
+            1,
+            29.0
+          ],
+          [
+            84,
+            2,
+            36.0
+          ],
+          [
+            85,
+            2,
+            33.0
+          ],
+          [
+            86,
+            1,
+            8.0
+          ],
+          [
+            88,
+            1,
+            16.0
+          ],
+          [
+            89,
+            1,
+            14.0
+          ],
+          [
+            90,
+            2,
+            43.0
+          ],
+          [
+            91,
+            1,
+            29.0
+          ],
+          [
+            92,
+            1,
+            17.0
+          ],
+          [
+            93,
+            1,
+            2.0
+          ],
+          [
+            94,
+            2,
+            24.0
+          ],
+          [
+            99,
+            2,
+            44.0
+          ]
+        ]
+      },
+      "business_basis": "验收按客户标识汇总的订单笔数和订单金额，客户与金额必须逐行对应。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "intent_id": "by_customer",
+      "category": "多维度与时间",
+      "difficulty": "中",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "case_id": "by_customer_synonym",
+      "tags": [
+        "synonym",
+        "legacy"
+      ],
+      "user_question": "2018-01-01 至 2018-04-09，每个客户标识各有多少笔订单、订单金额是多少",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY customer_id",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            1,
+            2,
+            33.0
+          ],
+          [
+            2,
+            1,
+            23.0
+          ],
+          [
+            3,
+            3,
+            65.0
+          ],
+          [
+            6,
+            1,
+            8.0
+          ],
+          [
+            7,
+            1,
+            26.0
+          ],
+          [
+            8,
+            2,
+            45.0
+          ],
+          [
+            9,
+            1,
+            30.0
+          ],
+          [
+            11,
+            1,
+            3.0
+          ],
+          [
+            12,
+            1,
+            4.0
+          ],
+          [
+            13,
+            1,
+            26.0
+          ],
+          [
+            16,
+            1,
+            12.0
+          ],
+          [
+            18,
+            1,
+            29.0
+          ],
+          [
+            19,
+            1,
+            3.0
+          ],
+          [
+            20,
+            1,
+            15.0
+          ],
+          [
+            21,
+            1,
+            22.0
+          ],
+          [
+            22,
+            3,
+            52.0
+          ],
+          [
+            25,
+            2,
+            24.0
+          ],
+          [
+            26,
+            2,
+            8.0
+          ],
+          [
+            27,
+            2,
+            27.0
+          ],
+          [
+            28,
+            1,
+            3.0
+          ],
+          [
+            30,
+            2,
+            57.0
+          ],
+          [
+            31,
+            1,
+            18.0
+          ],
+          [
+            32,
+            1,
+            30.0
+          ],
+          [
+            33,
+            1,
+            14.0
+          ],
+          [
+            34,
+            1,
+            3.0
+          ],
+          [
+            35,
+            2,
+            34.0
+          ],
+          [
+            36,
+            1,
+            28.0
+          ],
+          [
+            38,
+            1,
+            15.0
+          ],
+          [
+            39,
+            1,
+            10.0
+          ],
+          [
+            40,
+            1,
+            3.0
+          ],
+          [
+            41,
+            1,
+            10.0
+          ],
+          [
+            42,
+            2,
+            27.0
+          ],
+          [
+            46,
+            2,
+            64.0
+          ],
+          [
+            47,
+            2,
+            36.0
+          ],
+          [
+            50,
+            2,
+            47.0
+          ],
+          [
+            51,
+            3,
+            99.0
+          ],
+          [
+            52,
+            1,
+            27.0
+          ],
+          [
+            53,
+            2,
+            39.0
+          ],
+          [
+            54,
+            5,
+            57.0
+          ],
+          [
+            57,
+            2,
+            26.0
+          ],
+          [
+            59,
+            1,
+            1.0
+          ],
+          [
+            63,
+            2,
+            23.0
+          ],
+          [
+            64,
+            2,
+            30.0
+          ],
+          [
+            66,
+            3,
+            39.0
+          ],
+          [
+            68,
+            1,
+            23.0
+          ],
+          [
+            69,
+            2,
+            32.0
+          ],
+          [
+            70,
+            2,
+            54.0
+          ],
+          [
+            71,
+            3,
+            44.0
+          ],
+          [
+            76,
+            1,
+            2.0
+          ],
+          [
+            79,
+            2,
+            27.0
+          ],
+          [
+            80,
+            1,
+            29.0
+          ],
+          [
+            84,
+            2,
+            36.0
+          ],
+          [
+            85,
+            2,
+            33.0
+          ],
+          [
+            86,
+            1,
+            8.0
+          ],
+          [
+            88,
+            1,
+            16.0
+          ],
+          [
+            89,
+            1,
+            14.0
+          ],
+          [
+            90,
+            2,
+            43.0
+          ],
+          [
+            91,
+            1,
+            29.0
+          ],
+          [
+            92,
+            1,
+            17.0
+          ],
+          [
+            93,
+            1,
+            2.0
+          ],
+          [
+            94,
+            2,
+            24.0
+          ],
+          [
+            99,
+            2,
+            44.0
+          ]
+        ]
+      },
+      "business_basis": "用同义问法验收按客户标识汇总的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "intent_id": "top_customer",
+      "category": "多维度与时间",
+      "difficulty": "中",
+      "expected_metrics": [
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "case_id": "top_customer",
+      "tags": [
+        "legacy",
+        "ranking"
+      ],
+      "user_question": "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY customer_id\nORDER BY order_amount DESC, customer_id ASC\nLIMIT 1",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            51,
+            99.0
+          ]
+        ]
+      },
+      "business_basis": "验收该窗口内订单金额最高的客户标识。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "intent_id": "top_customer",
+      "category": "多维度与时间",
+      "difficulty": "中",
+      "expected_metrics": [
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "case_id": "top_customer_synonym",
+      "tags": [
+        "synonym",
+        "legacy",
+        "ranking"
+      ],
+      "user_question": "2018-01-01 至 2018-04-09，哪一个客户标识的订单金额最大",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY customer_id\nORDER BY order_amount DESC, customer_id ASC\nLIMIT 1",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            51,
+            99.0
+          ]
+        ]
+      },
+      "business_basis": "用同义问法验收订单金额最大的客户标识。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "lowest_customer",
+      "intent_id": "lowest_customer",
+      "category": "多维度与时间",
+      "tags": [
+        "ranking"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 订单金额最低的客户标识是什么，金额相同则取客户标识较小的",
+      "expected_metrics": [
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY customer_id\nORDER BY order_amount ASC, customer_id ASC\nLIMIT 1",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            59,
+            1.0
+          ]
+        ]
+      },
+      "business_basis": "验收订单金额最低的客户标识，金额相同时取较小的客户标识。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "peak_order_date",
+      "intent_id": "peak_order_date",
+      "category": "多维度与时间",
+      "tags": [
+        "date_grain"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 哪一天的订单金额最高，金额相同则取较早的日期",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "order_date"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT order_date, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY order_date\nORDER BY order_amount DESC, order_date ASC\nLIMIT 1",
+      "expected_result": {
+        "columns": [
+          "order_date",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "2018-01-28",
+            2,
+            88.0
+          ]
+        ]
+      },
+      "business_basis": "验收订单金额最高的日期，金额相同时取较早的日期。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "january_by_status",
+      "intent_id": "january_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown",
+        "date_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-01-31 按订单状态统计订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-01-31"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-01-31'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "已退货",
+            4,
+            49.0
+          ],
+          [
+            "已完成",
+            24,
+            424.0
+          ],
+          [
+            "退货中",
+            1,
+            23.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 1 月按订单状态拆开的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "april_by_status",
+      "intent_id": "april_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown",
+        "date_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-04-01 至 2018-04-09 按订单状态统计订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-04-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-04-01' AND DATE '2018-04-09'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "已下单",
+            8,
+            139.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 4 月 1 日至 9 日按订单状态拆开的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "march_by_status",
+      "intent_id": "march_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown",
+        "date_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-03-01 至 2018-03-31 按订单状态统计订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-03-01",
+            "2018-03-31"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-03-01' AND DATE '2018-03-31'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "已下单",
+            5,
+            145.0
+          ],
+          [
+            "已发货",
+            13,
+            198.0
+          ],
+          [
+            "已完成",
+            17,
+            279.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 3 月按订单状态拆开的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "credit_card_by_status",
+      "intent_id": "credit_card_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown",
+        "order_payment_columns"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 按订单状态统计信用卡金额",
+      "expected_metrics": [
+        "orders.credit_card_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, SUM(credit_card_amount) AS credit_card_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "credit_card_amount"
+        ],
+        "rows": [
+          [
+            "已下单",
+            69.0
+          ],
+          [
+            "已退货",
+            46.0
+          ],
+          [
+            "已发货",
+            129.0
+          ],
+          [
+            "已完成",
+            627.0
+          ],
+          [
+            "退货中",
+            0.0
+          ]
+        ]
+      },
+      "business_basis": "验收按订单状态拆开的信用卡金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "bank_transfer_by_status",
+      "intent_id": "bank_transfer_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown",
+        "order_payment_columns"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 按订单状态统计银行转账金额",
+      "expected_metrics": [
+        "orders.bank_transfer_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, SUM(bank_transfer_amount) AS bank_transfer_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "bank_transfer_amount"
+        ],
+        "rows": [
+          [
+            "已下单",
+            86.0
+          ],
+          [
+            "已完成",
+            243.0
+          ],
+          [
+            "已退货",
+            3.0
+          ],
+          [
+            "已发货",
+            64.0
+          ],
+          [
+            "退货中",
+            15.0
+          ]
+        ]
+      },
+      "business_basis": "验收按订单状态拆开的银行转账金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "returns_by_customer",
+      "intent_id": "returns_by_customer",
+      "category": "多维度与时间",
+      "tags": [
+        "customer_breakdown",
+        "status_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 按客户标识统计已退货和退货中的订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "in",
+          "value": [
+            "已退货",
+            "退货中"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status IN ('已退货', '退货中')\nGROUP BY customer_id",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            1,
+            1,
+            10.0
+          ],
+          [
+            2,
+            1,
+            23.0
+          ],
+          [
+            22,
+            1,
+            23.0
+          ],
+          [
+            40,
+            1,
+            3.0
+          ],
+          [
+            54,
+            1,
+            15.0
+          ],
+          [
+            64,
+            1,
+            13.0
+          ]
+        ]
+      },
+      "business_basis": "验收按客户标识统计已退货和退货中订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "customer_54_by_status",
+      "intent_id": "customer_54_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "customer_filter",
+        "status_breakdown"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 客户标识 54 按订单状态统计订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.customer_id",
+          "operator": "eq",
+          "value": 54
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND customer_id = 54\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "已发货",
+            1,
+            1.0
+          ],
+          [
+            "已完成",
+            3,
+            41.0
+          ],
+          [
+            "退货中",
+            1,
+            15.0
+          ]
+        ]
+      },
+      "business_basis": "验收客户标识 54 按订单状态拆开的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "february_by_status",
+      "intent_id": "february_by_status",
+      "category": "多维度与时间",
+      "tags": [
+        "status_breakdown",
+        "date_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-02-01 至 2018-02-28 按订单状态统计订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-02-01",
+            "2018-02-28"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "status"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT status, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-02-01' AND DATE '2018-02-28'\nGROUP BY status",
+      "expected_result": {
+        "columns": [
+          "status",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            "已完成",
+            26,
+            400.0
+          ],
+          [
+            "退货中",
+            1,
+            15.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 2 月按订单状态拆开的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "intent_id": "customer_orders",
+      "category": "JOIN 与 Fanout",
+      "difficulty": "中",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "customer_mart"
+      ],
+      "expected_relationships": [
+        "order_mart_customer_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "case_id": "customer_orders",
+      "tags": [
+        "legacy",
+        "equijoin"
+      ],
+      "user_question": "2018-01-01 至 2018-04-09 有客户记录的订单笔数和订单金额是多少",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nINNER JOIN customers ON orders.customer_id = customers.customer_id\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            99,
+            1672.0
+          ]
+        ]
+      },
+      "business_basis": "验收有客户记录的订单在等值内连接后，笔数和订单金额不被放大。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "intent_id": "customer_orders",
+      "category": "JOIN 与 Fanout",
+      "difficulty": "中",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "customer_mart"
+      ],
+      "expected_relationships": [
+        "order_mart_customer_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "case_id": "customer_orders_synonym",
+      "tags": [
+        "synonym",
+        "legacy",
+        "equijoin"
+      ],
+      "user_question": "2018-01-01 至 2018-04-09，能对上客户记录的订单有多少笔、订单金额是多少",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nINNER JOIN customers ON orders.customer_id = customers.customer_id\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            99,
+            1672.0
+          ]
+        ]
+      },
+      "business_basis": "用同义问法验收能对上客户记录的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "payment_preaggregate_keeps_order_amount",
+      "intent_id": "payment_preaggregate_keeps_order_amount",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "with"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09，先把支付明细按订单汇总再连接，订单笔数、订单金额、支付笔数和支付金额各是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount",
+        "payment_rows",
+        "payment_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "WITH paid AS (\n    SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount\n    FROM payments\n    GROUP BY order_id\n)\nSELECT COUNT(*) AS order_rows,\n       SUM(o.amount) AS order_amount,\n       SUM(paid.payment_rows) AS payment_rows,\n       SUM(paid.payment_amount) AS payment_amount\nFROM orders AS o\nJOIN paid ON paid.order_id = o.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount",
+          "payment_rows",
+          "payment_amount"
+        ],
+        "rows": [
+          [
+            99,
+            1672.0,
+            113,
+            1672.0
+          ]
+        ]
+      },
+      "business_basis": "验收先按订单汇总支付明细再连接时，订单金额不被支付行放大。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "payment_method_amounts",
+      "intent_id": "payment_method_amounts",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "with",
+        "payment_grain"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09，支付明细先按订单和支付方式汇总后再连接订单，各支付方式的支付笔数和支付金额是多少。不要汇总订单金额",
+      "expected_metrics": [
+        "payment_rows",
+        "payment_amount"
+      ],
+      "expected_dimensions": [
+        "payments.payment_method",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "payment_method"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "WITH paid AS (\n    SELECT order_id, payment_method, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount\n    FROM payments\n    GROUP BY order_id, payment_method\n)\nSELECT paid.payment_method,\n       SUM(paid.payment_rows) AS payment_rows,\n       SUM(paid.payment_amount) AS payment_amount\nFROM paid\nJOIN orders AS o ON o.order_id = paid.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY paid.payment_method\nORDER BY paid.payment_method",
+      "expected_result": {
+        "columns": [
+          "payment_method",
+          "payment_rows",
+          "payment_amount"
+        ],
+        "rows": [
+          [
+            "bank_transfer",
+            33,
+            411.0
+          ],
+          [
+            "coupon",
+            13,
+            185.0
+          ],
+          [
+            "credit_card",
+            55,
+            871.0
+          ],
+          [
+            "gift_card",
+            12,
+            205.0
+          ]
+        ]
+      },
+      "business_basis": "验收支付明细先按订单和支付方式汇总后，各支付方式的支付笔数和支付金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "multi_payment_orders",
+      "intent_id": "multi_payment_orders",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "with"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09，支付笔数多于 1 的订单有多少笔，订单金额和支付笔数合计是多少。支付明细要先按订单汇总",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount",
+        "payment_rows"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "payment_rows",
+          "operator": "gt",
+          "value": 1
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "WITH paid AS (\n    SELECT order_id, COUNT(*) AS payment_rows\n    FROM payments\n    GROUP BY order_id\n)\nSELECT COUNT(*) AS order_rows,\n       SUM(o.amount) AS order_amount,\n       SUM(paid.payment_rows) AS payment_rows\nFROM orders AS o\nJOIN paid ON paid.order_id = o.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND paid.payment_rows > 1",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount",
+          "payment_rows"
+        ],
+        "rows": [
+          [
+            13,
+            353.0,
+            27
+          ]
+        ]
+      },
+      "business_basis": "验收支付笔数多于一笔的订单，其订单金额要在按订单汇总之后计算。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "single_payment_orders",
+      "intent_id": "single_payment_orders",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "with"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09，只有 1 笔支付的订单有多少笔、订单金额是多少。支付明细要先按订单汇总",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "payment_rows",
+          "operator": "eq",
+          "value": 1
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "WITH paid AS (\n    SELECT order_id, COUNT(*) AS payment_rows\n    FROM payments\n    GROUP BY order_id\n)\nSELECT COUNT(*) AS order_rows, SUM(o.amount) AS order_amount\nFROM orders AS o\nJOIN paid ON paid.order_id = o.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND paid.payment_rows = 1",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            86,
+            1319.0
+          ]
+        ]
+      },
+      "business_basis": "验收只有一笔支付的订单笔数和订单金额，支付明细要先按订单汇总。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "未先按订单汇总支付明细就连接，订单金额会从 1672 放大到 2083，这种结果必须拒绝。",
+      "case_id": "payment_join_inflates_order_amount",
+      "intent_id": "payment_join_inflates_order_amount",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "inflation"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09，把订单和支付明细按订单标识直接连接后汇总订单金额",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "refuse",
+      "expected_sql": "SELECT SUM(o.amount) AS order_amount\nFROM orders AS o\nJOIN payments AS p ON p.order_id = o.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收未先汇总就连接支付明细会放大订单金额，这种情况必须拒绝。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "returned_orders_with_customer",
+      "intent_id": "returned_orders_with_customer",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "equijoin",
+        "status_filter"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09，已退货或退货中、并且有客户记录的订单笔数和订单金额是多少",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "customer_mart"
+      ],
+      "expected_relationships": [
+        "order_mart_customer_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "in",
+          "value": [
+            "已退货",
+            "退货中"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nINNER JOIN customers ON orders.customer_id = customers.customer_id\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status IN ('已退货', '退货中')",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            6,
+            87.0
+          ]
+        ]
+      },
+      "business_basis": "验收已退货或退货中、并且有客户记录的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "january_payment_methods",
+      "intent_id": "january_payment_methods",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "with",
+        "payment_grain"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-01-31，支付明细先按订单和支付方式汇总后再连接订单，各支付方式的支付笔数和支付金额是多少",
+      "expected_metrics": [
+        "payment_rows",
+        "payment_amount"
+      ],
+      "expected_dimensions": [
+        "payments.payment_method",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-01-31"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "payment_method"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "WITH paid AS (\n    SELECT order_id, payment_method, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount\n    FROM payments\n    GROUP BY order_id, payment_method\n)\nSELECT paid.payment_method,\n       SUM(paid.payment_rows) AS payment_rows,\n       SUM(paid.payment_amount) AS payment_amount\nFROM paid\nJOIN orders AS o ON o.order_id = paid.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-01-31'\nGROUP BY paid.payment_method\nORDER BY paid.payment_method",
+      "expected_result": {
+        "columns": [
+          "payment_method",
+          "payment_rows",
+          "payment_amount"
+        ],
+        "rows": [
+          [
+            "bank_transfer",
+            11,
+            136.0
+          ],
+          [
+            "coupon",
+            5,
+            90.0
+          ],
+          [
+            "credit_card",
+            15,
+            218.0
+          ],
+          [
+            "gift_card",
+            3,
+            52.0
+          ]
+        ]
+      },
+      "business_basis": "验收 2018 年 1 月各支付方式的支付笔数和支付金额，支付明细要先汇总。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "triple_payment_order",
+      "intent_id": "triple_payment_order",
+      "category": "JOIN 与 Fanout",
+      "tags": [
+        "fanout",
+        "with"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09，恰好有 3 笔支付的订单有多少笔。订单金额和支付金额要在按订单汇总之后再取，不能把订单金额乘上支付笔数",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount",
+        "payment_rows",
+        "payment_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "payment_rows",
+          "operator": "eq",
+          "value": 3
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "WITH paid AS (\n    SELECT order_id, COUNT(*) AS payment_rows, SUM(amount) AS payment_amount\n    FROM payments\n    GROUP BY order_id\n)\nSELECT COUNT(*) AS order_rows,\n       SUM(o.amount) AS order_amount,\n       SUM(paid.payment_rows) AS payment_rows,\n       SUM(paid.payment_amount) AS payment_amount\nFROM orders AS o\nJOIN paid ON paid.order_id = o.order_id\nWHERE o.order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND paid.payment_rows = 3",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount",
+          "payment_rows",
+          "payment_amount"
+        ],
+        "rows": [
+          [
+            1,
+            58.0,
+            3,
+            58.0
+          ]
+        ]
+      },
+      "business_basis": "验收恰好有三笔支付的订单数量，订单金额不能乘上支付笔数。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_prior_year",
+      "intent_id": "followup_prior_year",
+      "category": "多轮追问",
+      "tags": [
+        "followup",
+        "prior_year"
+      ],
+      "difficulty": "高",
+      "user_question": "去年同期",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2017-01-01",
+            "2017-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2017-01-01' AND DATE '2017-04-09'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": []
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 的订单笔数和订单金额是多少",
+      "business_basis": "验收同一会话把上一轮日期平移到去年同期后的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_january_completed",
+      "intent_id": "followup_january_completed",
+      "category": "多轮追问",
+      "tags": [
+        "followup"
+      ],
+      "difficulty": "中",
+      "user_question": "只看已完成的",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date",
+        "orders.status"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-01-31"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已完成"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-01-31'\n  AND status = '已完成'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            24,
+            424.0
+          ]
+        ]
+      },
+      "previous_question": "2018-01-01 至 2018-01-31 的订单笔数和订单金额是多少",
+      "business_basis": "验收在上一轮 1 月合计之后，只保留已完成订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_shipped_credit_card",
+      "intent_id": "followup_shipped_credit_card",
+      "category": "多轮追问",
+      "tags": [
+        "followup",
+        "order_payment_columns"
+      ],
+      "difficulty": "中",
+      "user_question": "已发货状态的信用卡金额是多少",
+      "expected_metrics": [
+        "orders.credit_card_amount"
+      ],
+      "expected_dimensions": [
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已发货"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT SUM(credit_card_amount) AS credit_card_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已发货'",
+      "expected_result": {
+        "columns": [
+          "credit_card_amount"
+        ],
+        "rows": [
+          [
+            129.0
+          ]
+        ]
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 按订单状态统计订单笔数和订单金额",
+      "business_basis": "验收在上一轮按状态汇总之后，追问已发货状态的信用卡金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_top_customer_tenders",
+      "intent_id": "followup_top_customer_tenders",
+      "category": "多轮追问",
+      "tags": [
+        "followup",
+        "order_payment_columns"
+      ],
+      "difficulty": "中",
+      "user_question": "这名客户的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+      "expected_metrics": [
+        "orders.credit_card_amount",
+        "orders.coupon_amount",
+        "orders.bank_transfer_amount",
+        "orders.gift_card_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.customer_id",
+          "operator": "eq",
+          "value": 51
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT SUM(credit_card_amount) AS credit_card_amount,\n       SUM(coupon_amount) AS coupon_amount,\n       SUM(bank_transfer_amount) AS bank_transfer_amount,\n       SUM(gift_card_amount) AS gift_card_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND customer_id = 51",
+      "expected_result": {
+        "columns": [
+          "credit_card_amount",
+          "coupon_amount",
+          "bank_transfer_amount",
+          "gift_card_amount"
+        ],
+        "rows": [
+          [
+            63.0,
+            16.0,
+            20.0,
+            0.0
+          ]
+        ]
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+      "business_basis": "验收在确认金额最高的客户之后，追问该客户的四种支付金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_top_two_customers",
+      "intent_id": "followup_top_two_customers",
+      "category": "多轮追问",
+      "tags": [
+        "followup",
+        "ranking"
+      ],
+      "difficulty": "中",
+      "user_question": "按订单金额从高到低列出前两名客户标识，金额相同则客户标识较小者在前",
+      "expected_metrics": [
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY customer_id\nORDER BY order_amount DESC, customer_id ASC\nLIMIT 2",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            51,
+            99.0
+          ],
+          [
+            3,
+            65.0
+          ]
+        ]
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 订单金额最高的客户标识是什么",
+      "business_basis": "验收在上一轮最高客户之后，按订单金额列出前两名客户标识。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_march_completed",
+      "intent_id": "followup_march_completed",
+      "category": "多轮追问",
+      "tags": [
+        "followup"
+      ],
+      "difficulty": "中",
+      "user_question": "其中已完成的呢",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date",
+        "orders.status"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-03-01",
+            "2018-03-31"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已完成"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE status = '已完成'\n  AND order_date BETWEEN DATE '2018-03-01' AND DATE '2018-03-31'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            17,
+            279.0
+          ]
+        ]
+      },
+      "previous_question": "2018-03-01 至 2018-03-31 的订单笔数和订单金额是多少",
+      "business_basis": "验收在上一轮 3 月合计之后，追问其中已完成订单的笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_february_bank_transfer",
+      "intent_id": "followup_february_bank_transfer",
+      "category": "多轮追问",
+      "tags": [
+        "followup",
+        "order_payment_columns"
+      ],
+      "difficulty": "中",
+      "user_question": "银行转账金额在 2018-02-01 至 2018-02-28 是多少",
+      "expected_metrics": [
+        "orders.bank_transfer_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-02-01",
+            "2018-02-28"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT SUM(bank_transfer_amount) AS bank_transfer_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-02-01' AND DATE '2018-02-28'",
+      "expected_result": {
+        "columns": [
+          "bank_transfer_amount"
+        ],
+        "rows": [
+          [
+            74.0
+          ]
+        ]
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 的信用卡、优惠券、银行转账和礼品卡金额分别是多少",
+      "business_basis": "验收在上一轮四种支付金额之后，追问 2 月的银行转账金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "followup_completed_by_customer",
+      "intent_id": "followup_completed_by_customer",
+      "category": "多轮追问",
+      "tags": [
+        "followup",
+        "customer_breakdown"
+      ],
+      "difficulty": "高",
+      "user_question": "按客户标识拆开，看每个客户的已完成订单笔数和订单金额",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.customer_id",
+        "orders.status",
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        },
+        {
+          "field": "orders.status",
+          "operator": "eq",
+          "value": "已完成"
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [
+          "customer_id"
+        ],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT customer_id, COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09' AND status = '已完成'\nGROUP BY customer_id",
+      "expected_result": {
+        "columns": [
+          "customer_id",
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": [
+          [
+            1,
+            1,
+            23.0
+          ],
+          [
+            3,
+            3,
+            65.0
+          ],
+          [
+            6,
+            1,
+            8.0
+          ],
+          [
+            7,
+            1,
+            26.0
+          ],
+          [
+            8,
+            2,
+            45.0
+          ],
+          [
+            12,
+            1,
+            4.0
+          ],
+          [
+            13,
+            1,
+            26.0
+          ],
+          [
+            16,
+            1,
+            12.0
+          ],
+          [
+            18,
+            1,
+            29.0
+          ],
+          [
+            19,
+            1,
+            3.0
+          ],
+          [
+            20,
+            1,
+            15.0
+          ],
+          [
+            22,
+            2,
+            29.0
+          ],
+          [
+            25,
+            2,
+            24.0
+          ],
+          [
+            26,
+            2,
+            8.0
+          ],
+          [
+            27,
+            1,
+            3.0
+          ],
+          [
+            28,
+            1,
+            3.0
+          ],
+          [
+            30,
+            1,
+            28.0
+          ],
+          [
+            31,
+            1,
+            18.0
+          ],
+          [
+            32,
+            1,
+            30.0
+          ],
+          [
+            33,
+            1,
+            14.0
+          ],
+          [
+            34,
+            1,
+            3.0
+          ],
+          [
+            35,
+            1,
+            15.0
+          ],
+          [
+            36,
+            1,
+            28.0
+          ],
+          [
+            38,
+            1,
+            15.0
+          ],
+          [
+            39,
+            1,
+            10.0
+          ],
+          [
+            42,
+            1,
+            22.0
+          ],
+          [
+            50,
+            2,
+            47.0
+          ],
+          [
+            51,
+            3,
+            99.0
+          ],
+          [
+            53,
+            2,
+            39.0
+          ],
+          [
+            54,
+            3,
+            41.0
+          ],
+          [
+            57,
+            2,
+            26.0
+          ],
+          [
+            59,
+            1,
+            1.0
+          ],
+          [
+            63,
+            1,
+            16.0
+          ],
+          [
+            64,
+            1,
+            17.0
+          ],
+          [
+            66,
+            1,
+            11.0
+          ],
+          [
+            69,
+            2,
+            32.0
+          ],
+          [
+            70,
+            1,
+            29.0
+          ],
+          [
+            71,
+            3,
+            44.0
+          ],
+          [
+            79,
+            2,
+            27.0
+          ],
+          [
+            80,
+            1,
+            29.0
+          ],
+          [
+            84,
+            1,
+            19.0
+          ],
+          [
+            85,
+            1,
+            9.0
+          ],
+          [
+            86,
+            1,
+            8.0
+          ],
+          [
+            88,
+            1,
+            16.0
+          ],
+          [
+            92,
+            1,
+            17.0
+          ],
+          [
+            93,
+            1,
+            2.0
+          ],
+          [
+            94,
+            2,
+            24.0
+          ],
+          [
+            99,
+            2,
+            44.0
+          ]
+        ]
+      },
+      "previous_question": "2018-01-01 至 2018-04-09 已完成订单的笔数和订单金额是多少",
+      "business_basis": "验收在上一轮已完成合计之后，按客户标识拆开已完成订单。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "平均订单金额尚未发布，不能返回结果。",
+      "case_id": "reject_average",
+      "intent_id": "reject_average",
+      "category": "权限与语义歧义",
+      "tags": [
+        "unsupported"
+      ],
+      "difficulty": "中",
+      "user_question": "平均订单金额是多少",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "refuse",
+      "expected_sql": "SELECT SUM(amount) / COUNT(*) AS average_order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收平均订单金额尚未发布，不能当作已授权指标返回。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "客户姓名未授权。应说明不能提供姓名，并改用客户标识，不能返回姓名。",
+      "case_id": "clarify_customer_name",
+      "intent_id": "clarify_customer_name",
+      "category": "权限与语义歧义",
+      "tags": [
+        "unsupported",
+        "clarify"
+      ],
+      "difficulty": "中",
+      "user_question": "客户标识 51 的客户姓名是什么",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.customer_id",
+          "operator": "eq",
+          "value": 51
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "clarify",
+      "expected_sql": "SELECT first_name, last_name\nFROM customers\nWHERE customer_id = 51",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收客户姓名未授权，应说明不能提供姓名并改用客户标识。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "raw 和 staging 不在订单主题空间的授权内。",
+      "case_id": "reject_raw_staging",
+      "intent_id": "reject_raw_staging",
+      "category": "权限与语义歧义",
+      "tags": [
+        "unsupported"
+      ],
+      "difficulty": "高",
+      "user_question": "查询 stg_payments 和 raw_orders 各有多少行",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "refuse",
+      "expected_sql": "SELECT (SELECT COUNT(*) FROM stg_payments) AS staging_rows,\n       (SELECT COUNT(*) FROM raw_orders) AS raw_rows",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收 raw 和 staging 不在订单主题授权内，必须拒绝。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "按月尚未授权，不能返回月度结果。",
+      "case_id": "reject_month",
+      "intent_id": "reject_month",
+      "category": "权限与语义歧义",
+      "tags": [
+        "unsupported"
+      ],
+      "difficulty": "中",
+      "user_question": "按月份统计 2018-01-01 至 2018-04-09 的订单金额",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "refuse",
+      "expected_sql": "SELECT date_trunc('month', order_date) AS month, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'\nGROUP BY 1",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收按月汇总尚未授权，不能返回月度订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "NPS 不在空间授权内。",
+      "case_id": "reject_nps",
+      "intent_id": "reject_nps",
+      "category": "权限与语义歧义",
+      "tags": [
+        "unsupported"
+      ],
+      "difficulty": "低",
+      "user_question": "NPS 是多少",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "refuse",
+      "expected_sql": "SELECT SUM(nps) AS nps FROM orders",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收 NPS 不在订单空间授权内，必须拒绝。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "支付金额不与订单金额相加。需要说明要看订单金额还是支付金额，不能把两者合成一个数。",
+      "case_id": "clarify_order_plus_payment",
+      "intent_id": "clarify_order_plus_payment",
+      "category": "权限与语义歧义",
+      "tags": [
+        "clarify",
+        "semantic"
+      ],
+      "difficulty": "高",
+      "user_question": "2018-01-01 至 2018-04-09 把订单金额和支付金额加在一起是多少",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "clarify",
+      "expected_sql": "",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收订单金额和支付金额不能相加，需要先澄清要看哪一个。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "没有已发布的客户数。请按客户标识分组，并使用订单笔数。",
+      "case_id": "clarify_customer_count",
+      "intent_id": "clarify_customer_count",
+      "category": "权限与语义歧义",
+      "tags": [
+        "clarify",
+        "unsupported"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 一共有多少个客户",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "clarify",
+      "expected_sql": "SELECT COUNT(DISTINCT customer_id) AS customer_count\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收没有已发布的客户数，应改按客户标识使用订单笔数。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "query_scope",
+      "intent_id": "query_scope",
+      "category": "上下文定位与补充",
+      "tags": [
+        "scope"
+      ],
+      "difficulty": "低",
+      "user_question": "能查什么",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [
+        "order_mart",
+        "customer_mart",
+        "payment_mart"
+      ],
+      "expected_relationships": [
+        "order_mart_customer_mart",
+        "payment_mart_order_mart"
+      ],
+      "expected_filters": [],
+      "comparison_policy": {
+        "ordered": true,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "expected_result": {
+        "columns": [
+          "scope"
+        ],
+        "rows": [
+          [
+            "可查询的数据范围\n这是订单主题空间。可以按订单日期、订单状态、客户标识筛选或分组。也可以按已授权关系关联后再汇总。\n1. 支付明细（payments）。当前可关联的列是amount、order_id、payment_method、订单日期。\n2. 订单汇总（orders）。可查询订单金额、订单笔数、信用卡金额、优惠券金额、银行转账金额、礼品卡金额。订单金额是 amount 的合计。四种支付金额之和等于 amount，不要再与 amount 相加。每笔订单一笔，包含全部状态。可按订单日期、订单状态、客户标识筛选和分组。订单状态包括已下单、已发货、已完成、退货中、已退货。\n3. 客户汇总（customers）。当前可关联的列是客户标识。\n订单汇总与客户汇总按客户标识等值内连接，多对一，不会放大行数。\n支付明细与订单汇总按order_id等值内连接，多对一，关联可能放大行数。\n用户询问客户姓名时，用客户标识回答，并说明姓名未授权。\n可以这样问\n某个日期区间的订单笔数和订单金额\n按订单状态汇总订单金额和订单笔数\n已完成订单的笔数和金额\n信用卡、优惠券、银行转账和礼品卡各自的金额\n每个客户有多少笔订单\n订单金额最高的客户是谁\n有客户记录的订单笔数和金额\n同一会话里接着问去年同期\n直接说出要看的时间、状态或客户即可查询。"
+          ]
+        ]
+      },
+      "split": "dev",
+      "expected_behavior": "answer",
+      "expected_sql": "",
+      "business_basis": "验收用户询问可查范围时，回复当前订单空间的授权说明。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "default_current_year_empty",
+      "intent_id": "default_current_year_empty",
+      "category": "上下文定位与补充",
+      "tags": [
+        "default_time"
+      ],
+      "difficulty": "中",
+      "user_question": "今天是 2026-11-21。用户没有写日期，只问订单笔数和订单金额。按今年截至今天回答",
+      "expected_metrics": [
+        "orders.order_count",
+        "orders.order_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2026-01-01",
+            "2026-11-21"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT COUNT(*) AS order_rows, SUM(amount) AS order_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2026-01-01' AND DATE '2026-11-21'",
+      "expected_result": {
+        "columns": [
+          "order_rows",
+          "order_amount"
+        ],
+        "rows": []
+      },
+      "business_basis": "验收用户不写日期时按今年截至今天过滤后的订单笔数和订单金额。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "订单金额最高的客户标识是 51，金额 99.0；订单笔数最高的客户标识是 54，共 5 笔。两者不是同一个人。需要补充按订单金额还是订单笔数，不能擅自选定。",
+      "case_id": "clarify_highest_customer_metric",
+      "intent_id": "clarify_highest_customer_metric",
+      "category": "上下文定位与补充",
+      "tags": [
+        "clarify"
+      ],
+      "difficulty": "高",
+      "user_question": "最高的客户是谁",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "holdout",
+      "expected_behavior": "clarify",
+      "expected_sql": "",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收未说明按金额还是笔数的最高客户时，必须先澄清口径。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "「成功」不在订单状态字典。授权状态只有已下单、已发货、已完成、退货中、已退货。需要补充是哪一个，不能把「成功」当成已完成。",
+      "case_id": "clarify_success_status",
+      "intent_id": "clarify_success_status",
+      "category": "上下文定位与补充",
+      "tags": [
+        "clarify"
+      ],
+      "difficulty": "中",
+      "user_question": "成功的订单有多少笔",
+      "expected_metrics": [],
+      "expected_dimensions": [],
+      "expected_datasets": [],
+      "expected_relationships": [],
+      "expected_filters": [],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "dev",
+      "expected_behavior": "clarify",
+      "expected_sql": "",
+      "expected_result": {
+        "columns": [],
+        "rows": []
+      },
+      "business_basis": "验收「成功」不在订单状态字典内，必须先澄清具体状态。"
+    },
+    {
+      "domain": "sales",
+      "space_id": "orders",
+      "dataset_snapshot_id": "jaffle_shop.duckdb@2859dd1db78e5c19",
+      "expected_refusal_reason": "",
+      "case_id": "credit_card_uses_order_metric",
+      "intent_id": "credit_card_uses_order_metric",
+      "category": "上下文定位与补充",
+      "tags": [
+        "dataset_location"
+      ],
+      "difficulty": "中",
+      "user_question": "2018-01-01 至 2018-04-09 的信用卡金额是多少",
+      "expected_metrics": [
+        "orders.credit_card_amount"
+      ],
+      "expected_dimensions": [
+        "orders.order_date"
+      ],
+      "expected_datasets": [
+        "order_mart"
+      ],
+      "expected_relationships": [],
+      "expected_filters": [
+        {
+          "field": "orders.order_date",
+          "operator": "between",
+          "value": [
+            "2018-01-01",
+            "2018-04-09"
+          ]
+        }
+      ],
+      "comparison_policy": {
+        "ordered": false,
+        "absolute_tolerance": 0.0,
+        "relative_tolerance": 0.0,
+        "decimal_places": 1,
+        "dimension_keys": [],
+        "duplicate_keys": "reject"
+      },
+      "split": "validation",
+      "expected_behavior": "answer",
+      "expected_sql": "SELECT SUM(credit_card_amount) AS credit_card_amount\nFROM orders\nWHERE order_date BETWEEN DATE '2018-01-01' AND DATE '2018-04-09'",
+      "expected_result": {
+        "columns": [
+          "credit_card_amount"
+        ],
+        "rows": [
+          [
+            871.0
+          ]
+        ]
+      },
+      "business_basis": "验收信用卡金额使用订单上已发布的支付金额，而不是支付明细金额。"
+    }
+  ]
+}

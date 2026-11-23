@@ -29,6 +29,10 @@ def connect(path: Path):
             FOREIGN KEY (message_id) REFERENCES messages(id)
         );
     ''')
+    if 'pending_clarification' not in {row['name'] for row in db.execute('PRAGMA table_info(conversations)')}:
+        db.execute('ALTER TABLE conversations ADD COLUMN pending_clarification TEXT')
+    if 'outcome' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
+        db.execute('ALTER TABLE messages ADD COLUMN outcome TEXT')
     with closing(db), db:
         columns = {row[1] for row in db.execute('PRAGMA table_info(messages)')}
         if 'process' not in columns:
@@ -66,12 +70,13 @@ def get(path: Path, conversation_id: str) -> dict | None:
         if row is None:
             return None
         messages = db.execute('''SELECT messages.id, messages.role, messages.content, messages.result,
-            messages.process, messages.created_at, feedback.rating AS feedback FROM messages
+            messages.process, messages.created_at, messages.outcome, feedback.rating AS feedback FROM messages
             LEFT JOIN feedback ON feedback.message_id = messages.id
             WHERE messages.conversation_id = ? ORDER BY messages.rowid''', (conversation_id,)).fetchall()
     return {
         'id': row['id'], 'title': row['title'], 'created_at': row['created_at'],
         'last_query': json.loads(row['last_query']) if row['last_query'] else None,
+        'pending_clarification': json.loads(row['pending_clarification']) if row['pending_clarification'] else None,
         'messages': [_message_row(message) for message in messages],
     }
 
@@ -80,6 +85,7 @@ def _message_row(message) -> dict:
     item = dict(message)
     item['result'] = json.loads(item['result']) if item['result'] else None
     item['process'] = _load_process(item.get('process'))
+    item['outcome'] = json.loads(item['outcome']) if item.get('outcome') else None
     return item
 
 
@@ -93,15 +99,16 @@ def _load_process(raw: str | None):
     return value if isinstance(value, list) else None
 
 
-def add_message(path: Path, conversation_id: str, role: str, content: str, result: dict | None = None, query: dict | None = None, process: list | None = None) -> str:
+def add_message(path: Path, conversation_id: str, role: str, content: str, result: dict | None = None, query: dict | None = None, process: list | None = None, outcome: dict | None = None) -> str:
     message_id = str(uuid.uuid4())
     with connect(path) as db:
         db.execute(
-            'INSERT INTO messages (id, conversation_id, role, content, result, process) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO messages (id, conversation_id, role, content, result, process, outcome) VALUES (?, ?, ?, ?, ?, ?, ?)',
             (
                 message_id, conversation_id, role, content,
                 json.dumps(result, ensure_ascii=False) if result is not None else None,
                 json.dumps(process, ensure_ascii=False) if process else None,
+                json.dumps(outcome, ensure_ascii=False) if outcome is not None else None,
             ),
         )
         if query is not None:
@@ -117,3 +124,9 @@ def save_feedback(path: Path, message_id: str, rating: str) -> bool:
         db.execute('''INSERT INTO feedback (message_id, rating) VALUES (?, ?)
             ON CONFLICT(message_id) DO UPDATE SET rating = excluded.rating''', (message_id, rating))
     return True
+
+
+def set_pending(path: Path, conversation_id: str, pending: dict | None):
+    with connect(path) as db:
+        db.execute('UPDATE conversations SET pending_clarification = ? WHERE id = ?',
+                   (json.dumps(pending, ensure_ascii=False) if pending else None, conversation_id))

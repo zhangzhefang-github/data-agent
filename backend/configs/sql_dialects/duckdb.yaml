@@ -6,7 +6,7 @@ rules:
   - 用户说出时间时，只把日期列与 DATE 'YYYY-MM-DD' 字面量比较或写成 BETWEEN，不要使用 date_trunc。
   - 用户没有说出时间时，不添加日期条件。
   - 未写 LIMIT 时使用默认行数上限。
-  - 只提交一条只读 SELECT。可以用 WITH、子查询、JOIN、GROUP BY 和窗口函数。订单笔数和订单金额要在一笔订单一行上计算。
+  - 只提交一条只读 SELECT。可以用 WITH、子查询、JOIN、GROUP BY、窗口函数和 UNION ALL。订单笔数和订单金额要在一笔订单一行上计算。
 examples:
   - sql: >
       SELECT
