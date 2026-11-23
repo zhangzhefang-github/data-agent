@@ -9,6 +9,6 @@
 - 助手消息保存当次步骤。刷新或重开会话后仍能看到「分析过程」。失败的请求不写消息，页面上的步骤停在错误状态。
 - 不增加「跳过分析、直接作答」。那是 Genie Agent mode 的另一项能力，这次不引入。
 
-同日，`backend/tests/test_query_progress.py`、`backend/tests/test_api.py` 和订单 Direct SQL 聊天测试覆盖了标题、流式事件和消息里的步骤，并与这次问数过程改动一起进入主仓库。
+同日，`backend/tests/test_query_progress.py`、`backend/tests/test_api.py` 和订单 Direct SQL 聊天测试覆盖了标题、流式事件和消息里的步骤，并与这次问数过程改动一起进入主仓库，提交为 `data-agent@895353f`。
 
 2026-11-23 提交前核对实现时，补已授权数据集还会多发出一步「补充已授权的数据集」（`backend/app/main.py` 里 `context-*` 进度）。上面三类是产品决定；这一步是上下文补齐，不另写过程说明。
