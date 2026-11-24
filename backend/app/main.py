@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 os.environ.setdefault("OPENAI_BASE_URL", "https://api.agicto.cn/v1")
 
-from agents import Agent, RunConfig, Runner, function_tool, set_tracing_export_api_key
+from agents import Agent, Runner, function_tool
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -41,9 +41,7 @@ from app.semantic.snapshot import build_orders_snapshot, validation_inputs
 from app.sql_prompt import authorized_tables, render_direct_sql_prompt, render_two_phase_prompt
 from app.query import Query, TimeRange, execute_query, load_catalog, locate_source, normalize_query, question_catalog, space_instructions
 from app.query_progress import QueryProgress, describe_sql, describe_structured, merge_agent_events
-
-if os.getenv("OPENAI_TRACING_API_KEY"):
-    set_tracing_export_api_key(os.environ["OPENAI_TRACING_API_KEY"])
+from app.tracing import agent_run_config
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
@@ -611,7 +609,7 @@ async def chat(request: ChatRequest):
             )
             run = Runner.run_streamed(
                 agent, prompt,
-                run_config=RunConfig(trace_include_sensitive_data=False, tracing_disabled=not bool(os.getenv("OPENAI_TRACING_API_KEY"))),
+                run_config=agent_run_config(),
                 **run_options,
             )
             async for kind, item in merge_agent_events(run.stream_events(), progress.queue):

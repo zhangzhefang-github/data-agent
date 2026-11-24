@@ -4,7 +4,7 @@ import os
 from datetime import date
 from uuid import uuid4
 
-from agents import Agent, RunConfig, Runner
+from agents import Agent, Runner
 
 from app.analysis.analyzer import Finding
 from app.analysis.models import (
@@ -13,6 +13,7 @@ from app.analysis.models import (
 )
 from app.analysis.plan_validator import requested_filters
 from app.query import TimeRange
+from app.tracing import agent_run_config
 
 
 PLANNER_INSTRUCTIONS = """
@@ -55,10 +56,7 @@ class AnalysisAgent:
             name='销售探索分析', model=os.getenv('OPENAI_MODEL', 'gpt-4.1-mini'),
             instructions=PLANNER_INSTRUCTIONS, output_type=AnalysisPlanDraft,
         )
-        self.run_config = RunConfig(
-            trace_include_sensitive_data=False,
-            tracing_disabled=not bool(os.getenv('OPENAI_TRACING_API_KEY')),
-        )
+        self.run_config = agent_run_config()
 
     async def plan(
         self, question: str, catalog: dict, today: date, time_range: TimeRange | None = None,

@@ -48,7 +48,7 @@ npm --prefix frontend run build
 
 接入前需验证业务日期与物理字段类型、销售额和退款口径、订单粒度，以及订单量在每个启用维度上可加总。当前实现支持 PostgreSQL、DuckDB 与 SQLite，生产数据接入需要使用具体目标库完成连通性和口径验收。
 
-模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。追踪导出默认关闭。需要 OpenAI Tracing 时，单独设置 `OPENAI_TRACING_API_KEY` 为有效的 OpenAI 密钥。模型服务密钥独立保存在 `OPENAI_API_KEY`。启用追踪时，应用关闭 SDK 中的敏感内容采集。
+模型调用可通过 `OPENAI_BASE_URL` 指向兼容服务。模型服务密钥保存在 `OPENAI_API_KEY`。追踪只在设置 `LANGSMITH_API_KEY` 或 `LANGCHAIN_API_KEY` 时发往 LangSmith，不发往 OpenAI 的追踪地址。启用追踪时不采集模型和工具的输入输出。
 
 销售 Golden Dataset 仍覆盖原来的结构化查询，使用固定的 2026-06-01 业务日期和独立 SQLite 测试数据。它不是这轮订单验收。运行以下命令可验证 11 条标准查询。输出包含每条实际 Query IR、SQL、执行状态、结果及失败环节。
 
