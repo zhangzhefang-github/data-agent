@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from contextlib import aclosing
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
@@ -20,6 +21,9 @@ from pydantic import BaseModel, Field
 
 from app.demo import initialize
 from app import conversations
+from app.analysis.analyzer import AnalyzerConfig
+from app.analysis.models import AnalysisBudget
+from app.analysis.orchestrator import AnalysisResult, run_analysis
 from app.order_clarification import (
     PRESENTATION_REPAIR, decide, is_presentation_choice, mentions_authorized_order_metric,
     mentions_unpublished_average, mentions_unpublished_share, resume, specified_customer_status_breakdown,
@@ -49,6 +53,8 @@ DATABASE_URL = os.getenv("SALES_DATABASE_URL") or None
 DUCKDB_PATH = os.getenv("SALES_DUCKDB_PATH") or None
 CONVERSATIONS = ROOT / "data" / "conversations.db"
 CATALOG = load_catalog(ROOT, os.getenv("SALES_SPACE", "sales"))
+ANALYSIS_BUDGET = AnalysisBudget.model_validate_json(os.getenv("SALES_ANALYSIS_BUDGET", "{}"))
+ANALYSIS_THRESHOLDS = AnalyzerConfig.model_validate_json(os.getenv("SALES_ANALYSIS_THRESHOLDS", "{}"))
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -77,6 +83,7 @@ def spaces():
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = None
+    mode: Literal['auto', 'query', 'analysis'] = 'auto'
 
 
 class FeedbackRequest(BaseModel):
@@ -163,6 +170,86 @@ def last_year(day: date) -> date:
         return day.replace(year=day.year - 1)
     except ValueError:
         return day.replace(year=day.year - 1, day=28)
+
+
+_DIAGNOSTIC_INTENT = re.compile(
+    r'(?:是否(?:有|存在|出现)?|有无|有没(?:有(?:什么|出现)?)?|有何|有哪些)\s*'
+    r'(?:明显|统计|任何|销售额)?\s*(?:异常|离群|反常)'
+    r'|(?:异常|波动|下跌|下降|下滑|骤降|增长|上涨|变化|偏高|偏低)(?:的|是什么)?(?:可能)?原因'
+    r'|(?:分析|排查|诊断|调查|解释|找出|识别|检测|检查|哪些).{0,24}(?:异常|离群)'
+    r'|(?:为什么|为何|怎么会).{0,30}(?:异常|波动|下跌|下降|下滑|骤降|增长|上涨|变化|偏高|偏低)'
+    r'|(?:异常|反常)(?:吗|么)[？?。！!\s]*$'
+    r'|\b(?:any|detect|find|identify|investigate|explain)\b.{0,32}\b(?:anomal(?:y|ies)|outliers?)\b'
+    r'|\bwhy\b.{0,40}\b(?:drop(?:ped)?|declin\w*|spik\w*|discrepanc\w*|decreas\w*|increas\w*)\b',
+    re.IGNORECASE,
+)
+
+
+def _analysis_requested(request: ChatRequest) -> bool:
+    if request.mode != 'auto':
+        return request.mode == 'analysis'
+    return CATALOG['id'] == 'sales' and bool(_DIAGNOSTIC_INTENT.search(request.message))
+
+
+async def _stream_analysis(question: str, conversation_id: str):
+    yield event('conversation', {'conversation_id': conversation_id})
+    if CATALOG['id'] != 'sales':
+        if _DIAGNOSTIC_INTENT.search(question):
+            conversations.set_pending(CONVERSATIONS, conversation_id, None)
+        reason = f"{CATALOG['name']}暂不支持探索分析，请选择普通问数或自动模式。"
+        outcome = {'status': 'refused', 'reason': reason}
+        message_id = conversations.add_message(CONVERSATIONS, conversation_id, 'assistant', reason, outcome=outcome)
+        yield event('text', {'delta': reason})
+        yield event('message', {'id': message_id})
+        yield event('done', {'status': 'completed', 'outcome': outcome})
+        return
+
+    queue: asyncio.Queue[dict] = asyncio.Queue()
+    yield event('analysis_progress', {'kind': 'planning_started'})
+
+    async def execution():
+        source = locate_source(DATABASE, DATABASE_URL, DUCKDB_PATH)
+        yield await run_analysis(
+            question=question, catalog=CATALOG, source=source,
+            today=datetime.now(ZoneInfo('Asia/Shanghai')).date(),
+            budget=ANALYSIS_BUDGET, analyzer_config=ANALYSIS_THRESHOLDS,
+            on_progress=queue.put_nowait,
+            source_label='SQLite ADS' if source.engine == 'sqlite' and EXTERNAL_SQLITE_PATH else None,
+        )
+
+    try:
+        async with aclosing(merge_agent_events(execution(), queue)) as updates:
+            async for kind, item in updates:
+                if kind == 'progress':
+                    yield event('analysis_progress', item)
+                else:
+                    analysis = item.model_dump(mode='json', exclude={
+                        'plan': {'tasks': {'__all__': {'rationale'}}},
+                    })
+    except Exception as exc:
+        logger.error('Analysis request failed (%s)', type(exc).__name__)
+        analysis = AnalysisResult(reason='探索分析失败，请检查模型连接和服务配置。').model_dump(mode='json')
+
+    validation = analysis['report_validation']
+    if not validation or validation['status'] != 'passed':
+        analysis['report'] = None
+        analysis['findings'] = []
+    status = analysis['status']
+    outcome_status, default_reason = {
+        'completed': ('success', '探索分析完成'),
+        'partial': ('partial', '探索分析已完成部分任务'),
+        'failed': ('analysis_failed', '探索分析失败'),
+    }[status]
+    reason = analysis['reason'] or default_reason
+    outcome = {'status': outcome_status, 'reason': reason}
+    content = analysis['report']['text'] if analysis['report'] else reason
+    message_id = conversations.add_message(
+        CONVERSATIONS, conversation_id, 'assistant', content, outcome=outcome, analysis=analysis,
+    )
+    yield event('analysis', analysis)
+    yield event('text', {'delta': content})
+    yield event('message', {'id': message_id})
+    yield event('done', {'status': 'failed' if status == 'failed' else 'completed', 'outcome': outcome})
 
 
 @app.post("/api/chat/stream")
@@ -628,6 +715,11 @@ async def chat(request: ChatRequest):
 
     async def guarded_stream():
         try:
+            if _analysis_requested(request):
+                async with aclosing(_stream_analysis(request.message, conversation_id)) as analysis_stream:
+                    async for item in analysis_stream:
+                        yield item
+                return
             async for item in stream():
                 yield item
         finally:

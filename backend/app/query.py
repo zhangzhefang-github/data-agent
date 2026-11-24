@@ -270,13 +270,43 @@ def execute_query(path: Path, query: Query, today: date, catalog: dict | None = 
     }
 
 
-def fetch_rows(source: DataSource, sql: str, parameters: list):
+def _remaining_query_time(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('数据查询已达到截止时间。')
+    return remaining
+
+
+async def _fetch_postgres_before_deadline(location: str, sql: str, parameters: list, deadline: float):
+    import asyncio
+    import psycopg
+
+    async with asyncio.timeout(_remaining_query_time(deadline)):
+        async with await psycopg.AsyncConnection.connect(location, connect_timeout=5) as db:
+            async with db.cursor() as cursor:
+                await cursor.execute('SET TRANSACTION READ ONLY')
+                milliseconds = max(1, int(1000 * _remaining_query_time(deadline)))
+                await cursor.execute("SELECT set_config('statement_timeout', %s, true)", (str(milliseconds),))
+                await cursor.execute(sql.replace('?', '%s'), parameters)
+                return await cursor.fetchall()
+
+
+def fetch_rows(source: DataSource, sql: str, parameters: list, *, deadline: float | None = None):
+    if deadline is not None:
+        deadline = min(deadline, time.monotonic() + 5)
+        _remaining_query_time(deadline)
     if source.engine == 'postgresql':
         from urllib.parse import urlsplit
         import psycopg
 
         if urlsplit(source.location).scheme not in ('postgres', 'postgresql'):
             raise ValueError('只支持 PostgreSQL 连接地址')
+        if deadline is not None:
+            import asyncio
+            try:
+                return asyncio.run(_fetch_postgres_before_deadline(source.location, sql, parameters, deadline))
+            except psycopg.errors.QueryCanceled as exc:
+                raise TimeoutError('PostgreSQL 查询已取消。') from exc
         with psycopg.connect(source.location, connect_timeout=5) as db:
             with db.cursor() as cursor:
                 cursor.execute('SET TRANSACTION READ ONLY')
@@ -289,14 +319,28 @@ def fetch_rows(source: DataSource, sql: str, parameters: list):
         import threading
 
         with duckdb.connect(source.location, read_only=True) as db:
-            timer = threading.Timer(5, db.interrupt)
+            timer = threading.Timer(5 if deadline is None else _remaining_query_time(deadline), db.interrupt)
             timer.start()
             try:
                 return db.execute(sql, parameters).fetchall()
+            except duckdb.InterruptException as exc:
+                if deadline is None:
+                    raise
+                raise TimeoutError('DuckDB 查询已取消。') from exc
             finally:
                 timer.cancel()
+                if deadline is not None:
+                    timer.join()
     uri = f'file:{quote(str(Path(source.location).resolve()))}?mode=ro'
-    with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
-        deadline = time.monotonic() + 5
-        db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
-        return db.execute(sql, parameters).fetchall()
+    timeout = 5 if deadline is None else _remaining_query_time(deadline)
+    with closing(sqlite3.connect(uri, uri=True, timeout=timeout)) as db:
+        statement_deadline = time.monotonic() + 5 if deadline is None else deadline
+        if deadline is not None:
+            db.execute(f'PRAGMA busy_timeout = {int(1000 * _remaining_query_time(deadline))}')
+        db.set_progress_handler(lambda: int(time.monotonic() >= statement_deadline), 1000)
+        try:
+            return db.execute(sql, parameters).fetchall()
+        except sqlite3.OperationalError as exc:
+            if deadline is not None and exc.sqlite_errorcode == sqlite3.SQLITE_INTERRUPT:
+                raise TimeoutError('SQLite 查询已取消。') from exc
+            raise

@@ -1,18 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Button, Card, Input, Layout, Modal, Typography } from 'antd'
-import { AnswerBody, Feedback, ResultView, type Rating, type Result } from './ResultView'
+import { Button, Card, Input, Layout, Modal, Segmented, Typography } from 'antd'
+import { AnalysisResultView, AnswerBody, Feedback, ResultView, type AnalysisPlan, type AnalysisResult, type AnalysisTask, type AnalysisTaskStatus, type Rating, type Result } from './ResultView'
 import 'antd/dist/reset.css'
 import './style.css'
 
-type Step = { id: string, title: string, state: 'active' | 'done' | 'error' }
+type Step = { id: string, title: string, state: 'pending' | 'active' | 'done' | 'error' | 'skipped', reason?: string | null }
 type Outcome = { status: string, reason: string }
+type ChatMode = 'auto' | 'query' | 'analysis'
+type AnalysisTimeline = { goal?: string, steps: Step[] }
+type AnalysisProgress =
+  | { kind: 'planning_started' }
+  | { kind: 'plan', plan: AnalysisPlan & { tasks: AnalysisTask[] } }
+  | { kind: 'report', status: AnalysisTaskStatus }
+  | { kind: 'task_started' | 'task_completed' | 'task_failed' | 'task_skipped' | 'drilldown', task: AnalysisTask }
 
 function replyText(content: string, outcome?: Outcome | null) {
   if (content.trim()) return content
   return outcome?.reason ?? ''
 }
-type Message = { id: string, role: string, content: string, result: Result | null, process?: Step[] | null, feedback?: Rating | null, outcome?: Outcome | null }
+type Message = { id: string, role: string, content: string, result: Result | null, process?: Step[] | null, feedback?: Rating | null, outcome?: Outcome | null, analysis?: AnalysisResult | null }
 type ConversationSummary = { id: string, title: string }
 function upsertStep(previous: Step[], step: Step): Step[] {
   const index = previous.findIndex(item => item.id === step.id)
@@ -21,16 +28,43 @@ function upsertStep(previous: Step[], step: Step): Step[] {
   next[index] = step
   return next
 }
-function QueryProcess({ steps }: { steps: Step[] }) {
+const analysisStepStates: Record<AnalysisTaskStatus, Step['state']> = {
+  PENDING: 'pending', RUNNING: 'active', COMPLETED: 'done', FAILED: 'error', SKIPPED: 'skipped',
+}
+const statusLabels: Record<Step['state'], string> = { pending: '待执行', active: '进行中', done: '已完成', error: '失败', skipped: '已跳过' }
+function analysisTaskStep(task: AnalysisTask): Step {
+  return { id: `analysis-task:${task.task_id}`, title: task.store_id ? `${task.title} · ${task.store_id}` : task.title, state: analysisStepStates[task.status], reason: task.reason }
+}
+function reportStep(status: AnalysisTaskStatus): Step {
+  return { id: 'analysis-report', title: '报告生成与证据校验', state: analysisStepStates[status] }
+}
+function analysisProgress(previous: AnalysisTimeline | undefined, update: AnalysisProgress): AnalysisTimeline {
+  if (update.kind === 'planning_started') return { steps: [{ id: 'analysis-plan', title: '准备分析计划', state: 'active' }] }
+  if (update.kind === 'plan') return { goal: update.plan.goal, steps: update.plan.tasks.map(analysisTaskStep) }
+  const step = update.kind === 'report' ? reportStep(update.status) : analysisTaskStep(update.task)
+  return { goal: previous?.goal, steps: upsertStep(previous?.steps ?? [], step) }
+}
+function savedAnalysisTimeline(data: AnalysisResult): AnalysisTimeline {
+  const steps = data.tasks.map(analysisTaskStep)
+  if (data.report_validation) steps.push(reportStep(data.report_validation.status === 'passed' ? 'COMPLETED' : 'FAILED'))
+  return { goal: data.plan?.goal, steps }
+}
+function QueryProcess({ steps, analysis, goal }: { steps: Step[], analysis?: boolean, goal?: string }) {
   const [open, setOpen] = useState(true)
   const live = steps.some(step => step.state === 'active')
   return <section className="process">
     <button className="process-toggle" type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      {live ? '正在分析数据' : '分析过程'}
+      {analysis ? '探索分析过程' : live ? '正在分析数据' : '分析过程'}
     </button>
-    {open && <ul className="process-list">
-      {steps.map(step => <li className={step.state} key={step.id}><span className="process-mark" />{step.title}</li>)}
-    </ul>}
+    {open && <>
+      {goal && <p className="process-goal">{goal}</p>}
+      <ul className="process-list">
+        {steps.map(step => <li className={step.state} key={step.id}>
+          <span className="process-mark" /><div>{step.title}{step.reason && <small className="process-reason">{step.reason}</small>}</div>
+          {analysis && <span className="process-state">{statusLabels[step.state]}</span>}
+        </li>)}
+      </ul>
+    </>}
   </section>
 }
 function App() {
@@ -60,10 +94,12 @@ function App() {
       if (!response.ok) throw new Error()
       const conversation = await response.json()
       setConversationId(id); setMessages(conversation.messages); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([]); setStatus('')
+      setAnalysis(undefined); setAnalysisTimeline(undefined)
     } catch { setStatus('无法加载会话') }
   }
   function newConversation() {
     setConversationId(undefined); setMessages([]); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([]); setStatus(''); setQuestion('')
+    setAnalysis(undefined); setAnalysisTimeline(undefined)
   }
   function confirmClear(id: string) {
     setClearError('')
@@ -90,8 +126,11 @@ function App() {
     }
   }
   const [question, setQuestion] = useState('')
+  const [mode, setMode] = useState<ChatMode>('auto')
   const [answer, setAnswer] = useState('')
   const [result, setResult] = useState<Result>()
+  const [analysis, setAnalysis] = useState<AnalysisResult>()
+  const [analysisTimeline, setAnalysisTimeline] = useState<AnalysisTimeline>()
   const [outcome, setOutcome] = useState<Outcome>()
   const [status, setStatus] = useState('')
   const [steps, setSteps] = useState<Step[]>([])
@@ -100,23 +139,28 @@ function App() {
   const [clearing, setClearing] = useState(false)
   const [clearError, setClearError] = useState('')
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const latestAnalysisRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const transcript = transcriptRef.current
-    if (transcript) transcript.scrollTop = transcript.scrollHeight
-  }, [messages, answer, result, status, steps, conversationId])
+    const latestAnalysis = latestAnalysisRef.current
+    if (transcript) transcript.scrollTop = latestAnalysis
+      ? transcript.scrollTop + latestAnalysis.getBoundingClientRect().top - transcript.getBoundingClientRect().top - 16
+      : transcript.scrollHeight
+  }, [messages, answer, result, analysis, analysisTimeline, status, steps, conversationId])
   async function submit() {
     if (!question.trim() || busy) return
     setBusy(true); setAnswer(''); setResult(undefined); setOutcome(undefined); setStatus('')
-    setSteps([{ id: 'understand', title: '理解问题', state: 'active' }])
+    setSteps([]); setAnalysis(undefined); setAnalysisTimeline(undefined)
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: 'user', content: question, result: null }])
     let activeId = conversationId
     try {
-      const response = await fetch('/api/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: question, conversation_id: conversationId }) })
+      const response = await fetch('/api/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: question, conversation_id: conversationId, mode }) })
       if (!response.ok || !response.body) throw new Error('服务不可用')
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let pending = ''
       let terminalStatus: string | undefined
+      let isAnalysis = false
       while (true) {
         const { value, done } = await reader.read()
         pending += decoder.decode(value, { stream: !done })
@@ -129,23 +173,29 @@ function App() {
           const data = JSON.parse(raw)
           if (kind === 'conversation') { activeId = data.conversation_id; setConversationId(activeId) }
           if (kind === 'progress') setSteps(previous => upsertStep(previous, data))
+          if (kind === 'analysis_progress') setAnalysisTimeline(previous => analysisProgress(previous, data))
+          if (kind === 'analysis') { isAnalysis = true; setAnalysis(data); setAnalysisTimeline(savedAnalysisTimeline(data)) }
           if (kind === 'text') setAnswer(previous => previous + data.delta)
           if (kind === 'result') setResult(data)
           if (kind === 'error') setStatus(data.message)
-          if (kind === 'done') { terminalStatus = data.status; setOutcome(data.outcome); setStatus(data.outcome?.status === 'success' ? '查询完成' : '') }
+          if (kind === 'done') { terminalStatus = data.status; setOutcome(data.outcome); setStatus(!isAnalysis && data.outcome?.status === 'success' ? '查询完成' : '') }
         }
         if (done) break
       }
       if (!terminalStatus) throw new Error('响应流中断')
       if (activeId) {
         const detail = await fetch(`/api/conversations/${encodeURIComponent(activeId)}`)
-        if (detail.ok) { setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([]) }
+        if (detail.ok) {
+          setMessages((await detail.json()).messages); setAnswer(''); setResult(undefined); setOutcome(undefined); setSteps([])
+          setAnalysis(undefined); setAnalysisTimeline(undefined)
+        }
         await loadHistory()
       }
       setQuestion('')
     } catch {
       setAnswer(''); setResult(undefined); setOutcome({ status: 'model_error', reason: '连接中断或服务不可用，请重试' }); setStatus('')
       setSteps(previous => previous.map(step => step.state === 'active' ? { ...step, state: 'error' } : step))
+      setAnalysisTimeline(previous => previous && { ...previous, steps: previous.steps.map(step => step.state === 'active' ? { ...step, state: 'error' } : step) })
     }
     finally { setBusy(false) }
   }
@@ -172,23 +222,35 @@ function App() {
         {conversationId && <Button danger disabled={busy} onClick={() => confirmClear(conversationId)}>清除会话</Button>}
       </header>
       <div className="transcript" ref={transcriptRef}>
-        {messages.map(message => <div className="turn" key={message.id}>
+        {messages.map((message, index) => <div className="turn" key={message.id}>
           {message.role === 'user' ? <div className="user-turn">{message.content}</div> : <>
             {message.process && message.process.length > 0 && <QueryProcess steps={message.process} />}
-            <Card className="answer-card" title="说明">
+            {message.analysis ? <div ref={index === messages.length - 1 ? latestAnalysisRef : undefined} className="analysis-result">
+              {message.analysis.tasks.length > 0 && <QueryProcess analysis {...savedAnalysisTimeline(message.analysis)} />}
+              <AnalysisResultView data={message.analysis} />
+              <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
+            </div> : <Card className="answer-card" title="说明">
               <AnswerBody text={replyText(message.content, message.outcome)} />
               <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
-            </Card>
+            </Card>}
           </>}
           {message.result && <ResultView data={message.result} />}
         </div>)}
         {messages.length === 0 && !answer && <Card className="intro"><Typography.Title level={4}>今天想了解什么？</Typography.Title><p>{spaceId === 'orders' ? '例如：查询各订单状态的订单金额' : '例如：查询今年各城市的销售额'}</p></Card>}
         {steps.length > 0 && <QueryProcess steps={steps} />}
+        {busy && !steps.length && !analysisTimeline && !answer && <p className="status" role="status">正在等待响应</p>}
         {status && <p className="status">{status}</p>}
-        {(answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={replyText(answer, outcome)} /></Card>}
+        {(analysis || !!analysisTimeline?.steps.length) && <div className="analysis-result" ref={analysis ? latestAnalysisRef : undefined}>
+          {!!analysisTimeline?.steps.length && <QueryProcess analysis {...analysisTimeline} />}
+          {analysis && <AnalysisResultView data={analysis} />}
+        </div>}
+        {!analysis && (answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={replyText(answer, outcome)} /></Card>}
         {result && (!outcome || outcome.status === 'success') && <ResultView data={result} />}
       </div>
       <div className="composer">
+        <Segmented<ChatMode> className="chat-mode" aria-label="回答模式" value={mode} options={[
+          { label: '自动', value: 'auto' }, { label: '普通问数', value: 'query' }, { label: '探索分析', value: 'analysis' },
+        ]} disabled={busy} onChange={setMode} />
         <div className="ask">
           <Input.TextArea value={question} onChange={e => setQuestion(e.target.value)} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); submit() } }} placeholder="输入销售问题" autoSize={{ minRows: 2, maxRows: 5 }} />
           <Button type="primary" loading={busy} onClick={submit}>发送</Button>

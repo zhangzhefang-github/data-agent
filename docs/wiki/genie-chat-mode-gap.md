@@ -21,3 +21,14 @@
 1. 把 Wren 对照订单题作为第一项质量里程碑。用真实模型比较实际结果集，覆盖续问、应拒绝的访问和「能查什么」，留存可复查成绩。将拒绝题的通过条件收紧为明确的授权拒绝，避免工作区评测把一般请求失败算作通过。[补齐 Wren 问数](wren-parity-goal.md) · [拒绝题评分](../../backend/app/evaluation/runner.py#L236)
 2. 让分析师编辑并审核 Space 版本、发布通过同一份空间授权校验的可信 SQL，将反馈关联到查询和语义快照，并把复核过的问题收入评测集。
 3. 在多人分享前，补齐用户身份、Space 与数据权限，以及按用户和 Space 隔离的历史与反馈。多步 Agent mode 和 Databricks 平台级集成延后评估。
+
+## 2026-11-24 销售探索分析与 Genie Agent mode
+
+以 `data-agent@92b03047be5bebaf4a267d65eb04fc06bd00fb19` 为盘点基线，该提交的销售和订单聊天只保存最后一次成功查询。2026-11-24 工作区新增销售探索分析，以独立模式提供结构化计划、实际任务状态、多个只读 SQL 结果、门店产品下钻和经证据校验的报告。报告含图表、查询证据及可查看的 SQL，任务和证据可随会话重开。历史问数过程见原有产品决定。[ADR 0009](../adr/0009-analysis-mode-orchestration.md) · [问数过程](query-process.md)
+
+2026-11-24 验证时，销售探索分析首版仍在本地工作区，尚未合入 `main`。前端构建通过，探索分析专项测试 66 项全部通过。聊天集成测试用合成销售数据验证了两种查询范围。日期覆盖检查统计整个销售 ADS，趋势和维度查询保留用户指定的日期、城市和产品筛选。测试使用替代规划器，真实模型端到端验收待做。[聊天集成测试](../../backend/tests/test_analysis_chat.py#L161) · [任务编排测试](../../backend/tests/test_analysis_orchestrator.py) · [统计与报告测试](../../backend/tests/test_analysis_statistics.py)
+
+- **研究灵活度**。Genie 可根据每步结果调整研究计划，分析中可追问澄清，报告完成后可继续细化。当前销售探索分析采用有限任务枚举和单层门店产品下钻，且仅覆盖 `sales_summary` 的汇总口径。[Genie Agent mode](https://docs.databricks.com/aws/en/genie-agents/concepts#agent-mode) · [Genie 对话](https://docs.databricks.com/aws/en/genie-agents/talk-to-genie#use-agent-mode)
+- **数据与工具来源**。Genie 可用 Unity Catalog volumes 的非结构化文件（公共预览）以及 MCP 连接的数据源和工具。当前探索分析的证据来源为销售 ADS。[Genie 数据来源](https://docs.databricks.com/aws/en/genie-agents/concepts#what-data-can-i-use)
+- **交互和分享**。Genie 提供 `Answer now`，可以在探索过程中结束并用已有材料作答，也支持导出带图表和引证的 PDF，以及提交报告给有权限的作者复核。当前分析以执行预算停止，通过本地会话查看报告和证据。[Genie 对话](https://docs.databricks.com/aws/en/genie-agents/talk-to-genie#use-agent-mode)
+- **治理**。Genie 分开管理计算访问和按用户身份执行的 Unity Catalog 数据权限，支持逐用户的行过滤、列掩码和审计归属。当前销售分析以 YAML 的空间授权和本地证据记录为边界，分析师审核发布、用户与空间隔离、共享及用户级治理仍待建设。[Genie 数据访问](https://docs.databricks.com/aws/en/genie-agents/concepts#how-data-access-works)

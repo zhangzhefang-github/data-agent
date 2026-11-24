@@ -21,7 +21,7 @@
 
 ## 产品对标
 
-- [Genie Chat mode 对标](genie-chat-mode-gap.md) 记录 2026-11-22 的产品差距和建议顺序。
+- [Genie Chat mode 对标](genie-chat-mode-gap.md) 记录 2026-11-22 的问数产品差距，以及 [11-24 销售探索分析的本地验证与对标](genie-chat-mode-gap.md#2026-11-24-销售探索分析与-genie-agent-mode)。设计见 [ADR 0009](../adr/0009-analysis-mode-orchestration.md)。
 - [Genie 的 SQL 形状](genie-sql-shape.md)：2026-11-22，Genie 只限制只读和空间内的表。WITH 用来在一条查询里把 Fanout 汇总到正确粒度，比固定一种 JOIN 更灵活；放大后的订单指标仍然拒绝。决定见 [ADR 0007](../adr/0007-readonly-sql-with-fanout.md)。
 
 ## 2026-11-23 评审待办
