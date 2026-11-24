@@ -49,12 +49,13 @@ function savedAnalysisTimeline(data: AnalysisResult): AnalysisTimeline {
   if (data.report_validation) steps.push(reportStep(data.report_validation.status === 'passed' ? 'COMPLETED' : 'FAILED'))
   return { goal: data.plan?.goal, steps }
 }
-function QueryProcess({ steps, analysis, goal }: { steps: Step[], analysis?: boolean, goal?: string }) {
-  const [open, setOpen] = useState(true)
+function QueryProcess({ steps, analysis, goal, defaultOpen = true }: { steps: Step[], analysis?: boolean, goal?: string, defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   const live = steps.some(step => step.state === 'active')
-  return <section className="process">
+  const completed = analysis && steps.every(step => step.state === 'done')
+  return <section className={analysis ? 'process analysis-process' : 'process'}>
     <button className="process-toggle" type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      {analysis ? '探索分析过程' : live ? '正在分析数据' : '分析过程'}
+      {completed ? `探索分析过程 · ${steps.length} 项已完成` : analysis ? '探索分析过程' : live ? '正在分析数据' : '分析过程'}
     </button>
     {open && <>
       {goal && <p className="process-goal">{goal}</p>}
@@ -199,6 +200,7 @@ function App() {
     }
     finally { setBusy(false) }
   }
+  const latestMessage = messages[messages.length - 1]
   return <Layout className="shell">
     <Layout.Sider className="sidebar" width={260}>
       <div className="brand">Data Agent</div>
@@ -226,8 +228,8 @@ function App() {
           {message.role === 'user' ? <div className="user-turn">{message.content}</div> : <>
             {message.process && message.process.length > 0 && <QueryProcess steps={message.process} />}
             {message.analysis ? <div ref={index === messages.length - 1 ? latestAnalysisRef : undefined} className="analysis-result">
-              {message.analysis.tasks.length > 0 && <QueryProcess analysis {...savedAnalysisTimeline(message.analysis)} />}
-              <AnalysisResultView data={message.analysis} />
+              <AnalysisResultView data={message.analysis} question={messages[index - 1]?.content ?? ''}
+                process={message.analysis.tasks.length > 0 && <QueryProcess analysis defaultOpen={false} {...savedAnalysisTimeline(message.analysis)} />} />
               <Feedback messageId={message.id} rating={message.feedback} onChange={rating => setMessages(previous => previous.map(item => item.id === message.id ? { ...item, feedback: rating } : item))} />
             </div> : <Card className="answer-card" title="说明">
               <AnswerBody text={replyText(message.content, message.outcome)} />
@@ -241,8 +243,9 @@ function App() {
         {busy && !steps.length && !analysisTimeline && !answer && <p className="status" role="status">正在等待响应</p>}
         {status && <p className="status">{status}</p>}
         {(analysis || !!analysisTimeline?.steps.length) && <div className="analysis-result" ref={analysis ? latestAnalysisRef : undefined}>
-          {!!analysisTimeline?.steps.length && <QueryProcess analysis {...analysisTimeline} />}
-          {analysis && <AnalysisResultView data={analysis} />}
+          {analysis ? <AnalysisResultView data={analysis} question={latestMessage?.content ?? ''}
+            process={!!analysisTimeline?.steps.length && <QueryProcess analysis defaultOpen={false} {...analysisTimeline} />} />
+            : analysisTimeline && <QueryProcess analysis {...analysisTimeline} />}
         </div>}
         {!analysis && (answer || outcome?.reason) && <Card className="answer-card" title="说明"><AnswerBody text={replyText(answer, outcome)} /></Card>}
         {result && (!outcome || outcome.status === 'success') && <ResultView data={result} />}

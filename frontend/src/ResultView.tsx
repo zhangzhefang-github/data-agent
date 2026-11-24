@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Button, Card, Segmented, Statistic, Table } from 'antd'
 import * as echarts from 'echarts'
+import { CitySalesAnswer, citySalesAnswer, isSalesDiagnosis } from './CitySalesAnswer'
 import { highlightSql } from './sqlHighlight'
 
 export type Result = { columns: string[], rows: (string | number | null)[][], sql: string, source: string, elapsed_ms: number }
@@ -8,14 +9,21 @@ export type Rating = 'correct' | 'incorrect'
 export type AnalysisTaskStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
 export type AnalysisTask = { task_id: string, title: string, task_type: string, status: AnalysisTaskStatus, reason?: string | null, store_id?: string | null }
 export type AnalysisPlan = { goal: string, scope: { time_range: { start: string, end: string } | null } }
-type AnalysisEvidence = Result & {
+export type AnalysisEvidence = Result & {
   evidence_id: string, task_id: string, task_type: string, row_count: number,
   store_id?: string | null,
   parameters: (string | number)[], possible_truncation: boolean,
   dataset_id: string, snapshot_id: string,
+  time_range?: { start: string, end: string } | null,
+  filters?: { dimension_id: string, value: string }[],
 }
-type AnalysisFinding = { kind: string, evidence_id: string }
-type Anomaly = AnalysisFinding & { kind: 'statistical_anomaly', dimension_id: string, metric_id: string, label: string, value: number, median: number, direction: 'high' | 'low' }
+type AnalysisFinding = { evidence_id: string } & (
+  | { kind: 'statistical_anomaly', dimension_id: string, metric_id: string, label: string, value: number, median: number, direction: 'high' | 'low' }
+  | { kind: 'metric_summary', metric_id: string, dimension_id: string, status: 'sufficient' | 'insufficient_sample' | 'partial_evidence', sample_size: number, total: number | null }
+  | { kind: 'calendar_coverage', observed_days: number, first_business_date: string, last_business_date: string, missing_dates: string[] }
+  | { kind: 'data_profile', first_business_date: string | null, last_business_date: string | null }
+  | { kind: 'monthly_trend' | 'business_pattern_difference' | 'data_quality' | 'partial_evidence' }
+)
 type AnalysisSection = { key: string, title: string, text: string, evidence_ids: string[] }
 export type AnalysisResult = {
   mode: 'analysis', status: 'completed' | 'partial' | 'failed', plan: AnalysisPlan | null, tasks: AnalysisTask[],
@@ -90,9 +98,9 @@ function QueryResult({ data, evidence }: { data: Result, evidence?: AnalysisEvid
   </>
 }
 
-function EvidencePanel({ evidence, title, id, defaultOpen }: { evidence: AnalysisEvidence, title: string, id: string, defaultOpen: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
-  return <details id={id} className="evidence-panel" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+function EvidencePanel({ evidence, title, id }: { evidence: AnalysisEvidence, title: string, id: string }) {
+  const [open, setOpen] = useState(false)
+  return <details id={id} className="evidence-panel" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{title} · {evidence.row_count} 行</summary>
     {open && <div className="evidence-body">
       <p className="evidence-metadata">{evidence.dataset_id} · 语义上下文快照 {evidence.snapshot_id}</p>
@@ -102,29 +110,51 @@ function EvidencePanel({ evidence, title, id, defaultOpen }: { evidence: Analysi
   </details>
 }
 
-export function AnalysisResultView({ data }: { data: AnalysisResult }) {
+export function AnalysisResultView({ data, question, process }: { data: AnalysisResult, question: string, process?: ReactNode }) {
   const prefix = useId()
+  const evidenceList = useRef<HTMLDetailsElement>(null)
   const evidenceIndexes = new Map(data.evidence.map((item, index) => [item.evidence_id, index]))
   const taskTitles = new Map(data.tasks.map(task => [task.task_id, task.title]))
-  const dailyEvidence = data.evidence.find(item => item.task_type === 'daily_trend')
-  const anomalies = data.findings.filter((item): item is Anomaly => item.kind === 'statistical_anomaly')
+  const primary = citySalesAnswer(question, data)
+  const report = data.report_validation?.status === 'passed' ? data.report : null
+  const anomalies = report ? data.findings.filter(item => item.kind === 'statistical_anomaly') : []
   function evidenceLink(evidenceId: string) {
     const index = evidenceIndexes.get(evidenceId)
     if (index === undefined) return null
     const id = `${prefix}-evidence-${index}`
-    return <a key={evidenceId} href={`#${id}`} onClick={() => {
+    return <a key={evidenceId} className="analysis-citation" href={`#${id}`} onClick={event => {
       const details = document.getElementById(id)
-      if (details instanceof HTMLDetailsElement) details.open = true
+      if (!(details instanceof HTMLDetailsElement)) return
+      event.preventDefault()
+      if (evidenceList.current) evidenceList.current.open = true
+      details.open = true
+      details.querySelector('summary')?.focus({ preventScroll: true })
+      details.scrollIntoView({ block: 'nearest' })
     }}>证据 {index + 1}</a>
   }
+  const sections = report?.sections.filter(section => section.key !== 'evidence') ?? []
+  const diagnostic = isSalesDiagnosis(question)
+    ? sections.filter(section => section.key === 'anomalies' || section.key === 'performance') : []
+  const reportDetails = sections.filter(section => !diagnostic.includes(section))
+  function renderSection(section: AnalysisSection) {
+    return <section className="analysis-section" key={section.key}>
+      <h3>{section.title}</h3>
+      <AnswerBody text={section.text} />
+      {section.evidence_ids.length > 0 && <div className="evidence-references">{section.evidence_ids.map(evidenceLink)}</div>}
+    </section>
+  }
+
   return <div className="analysis-result">
-    <Card className="answer-card" title="分析结论">
+    <Card className="answer-card" title={primary ? '各城市销售结果' : '分析结论'}>
       {data.status !== 'completed' && data.reason && <AnswerBody text={data.reason} />}
-      {data.report && data.report.sections.map(section => <section className="analysis-section" key={section.key}>
-        <h3>{section.title}</h3>
-        <AnswerBody text={section.text} />
-        {section.evidence_ids.length > 0 && <div className="evidence-references">{section.evidence_ids.map(evidenceLink)}</div>}
-      </section>)}
+      {primary && <CitySalesAnswer answer={primary} cite={evidenceLink} />}
+      {diagnostic.map(renderSection)}
+      {reportDetails.length > 0 && (primary || diagnostic.length > 0 ?
+        <details className="analysis-disclosure">
+          <summary>查看分析报告</summary>
+          {reportDetails.map(renderSection)}
+        </details>
+        : reportDetails.map(renderSection))}
       {data.incomplete.length > 0 && <details>
         <summary>未完成事项</summary>
         <ul>{data.incomplete.map((item, index) => <li key={index}>{item}</li>)}</ul>
@@ -132,7 +162,7 @@ export function AnalysisResultView({ data }: { data: AnalysisResult }) {
       {data.report_validation?.status === 'passed' && <p className="evidence-metadata">报告与证据已核对</p>}
       {data.report_validation?.status === 'failed' && <p>报告校验未通过。可查看已完成任务的查询证据。</p>}
     </Card>
-    {data.report && anomalies.length > 0 && <Card title="统计异常候选">
+    {anomalies.length > 0 && <Card title="统计异常候选">
       <Table rowKey="key" pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }}
         dataSource={anomalies.map((item, index) => ({ ...item, key: index }))} columns={[
           { title: '分组', render: (_, item) => {
@@ -147,11 +177,12 @@ export function AnalysisResultView({ data }: { data: AnalysisResult }) {
           { title: '来源', render: (_, item) => evidenceLink(item.evidence_id) },
         ]} />
     </Card>}
-    {data.evidence.length > 0 && <Card title="查询证据">
+    {process}
+    {data.evidence.length > 0 && <details className="analysis-evidence-list" ref={evidenceList}>
+      <summary>查询证据 · {data.evidence.length} 项</summary>
       {data.evidence.map((item, index) => <EvidencePanel evidence={item} key={item.evidence_id}
-        id={`${prefix}-evidence-${index}`} title={`证据 ${index + 1} · ${taskTitles.get(item.task_id) ?? item.dataset_id}`}
-        defaultOpen={item.evidence_id === (dailyEvidence ?? data.evidence[0]).evidence_id} />)}
-    </Card>}
+        id={`${prefix}-evidence-${index}`} title={`证据 ${index + 1} · ${taskTitles.get(item.task_id) ?? item.dataset_id}`} />)}
+    </details>}
   </div>
 }
 
